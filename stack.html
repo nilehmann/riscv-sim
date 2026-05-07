@@ -65,40 +65,10 @@
         overflow: hidden;
       }
 
-      .tab-bar {
-        display: flex;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface);
-        flex-shrink: 0;
-      }
-      .tab {
-        font-family: var(--mono);
-        font-size: 16px;
-        padding: 10px 18px;
-        cursor: pointer;
-        color: var(--text-dim);
-        border-bottom: 2px solid transparent;
-        transition: color 0.15s;
-        user-select: none;
-      }
-      .tab:hover {
-        color: var(--text);
-      }
-      .tab.active {
-        color: var(--text);
-        border-bottom-color: var(--blue);
-      }
-
       .code-scroll {
         flex: 1;
         overflow-y: auto;
         padding: 16px 0;
-      }
-      .code-view {
-        display: none;
-      }
-      .code-view.active {
-        display: block;
       }
 
       .line {
@@ -154,9 +124,6 @@
         color: var(--text-faint);
         font-style: italic;
       }
-      .str {
-        color: var(--orange);
-      }
 
       /* ── STACK + DESCRIPTION CENTER PANEL ── */
       .center-panel {
@@ -171,7 +138,6 @@
         background: var(--surface);
         min-height: 80px;
         flex-shrink: 0;
-        display: none;
       }
       .desc-label {
         font-family: var(--mono);
@@ -242,32 +208,6 @@
       .frame.caller .frame-slot {
         background: rgba(100, 110, 120, 0.08);
       }
-      .frame.baz.reserved .frame-slot {
-        background: var(--blue-dim);
-      }
-      .frame.baz:not(.reserved) .frame-slot,
-      .frame.free .frame-slot {
-        background: var(--bg);
-        border-top-style: dashed;
-      }
-      .frame.baz:not(.reserved) .slot-name,
-      .frame.baz:not(.reserved) .slot-val,
-      .frame.free .slot-name,
-      .frame.free .slot-val {
-        color: var(--text-faint);
-      }
-      .frame.foo .frame-slot {
-        background: var(--green-dim);
-      }
-      .frame.baz.reserved .slot-name {
-        color: var(--blue);
-      }
-      .frame.foo .slot-name {
-        color: var(--green);
-      }
-      .frame-slot.hi {
-        background: var(--orange-dim) !important;
-      }
       .frame-ellipsis {
         border-top: 1px solid var(--border);
         padding: 5px 16px;
@@ -284,7 +224,12 @@
       .frame.free .frame-ellipsis {
         border-bottom: none;
       }
-      .frame-slot.empty {
+      .frame.free .frame-slot {
+        background: var(--bg);
+        border-top-style: dashed;
+      }
+      .frame.free .slot-name,
+      .frame.free .slot-val {
         color: var(--text-faint);
       }
       .slot-name {
@@ -492,6 +437,10 @@
         background: #0860ca;
       }
 
+      select.btn {
+        padding: 5px 10px;
+      }
+
       .scrollable::-webkit-scrollbar {
         width: 4px;
       }
@@ -506,6 +455,7 @@
   </head>
   <body>
     <div class="controls">
+      <select class="btn" id="prog-select"></select>
       <span class="step-counter" id="step-counter">0 / 0</span>
       <div class="progress-bar">
         <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
@@ -515,17 +465,10 @@
     </div>
 
     <div class="main">
-      <!-- LEFT: código -->
+      <!-- LEFT: assembly -->
       <div class="code-panel">
-        <div class="tab-bar">
-          <div class="tab active" id="tab-c" onclick="showTab('c')">C</div>
-          <div class="tab" id="tab-asm" onclick="showTab('asm')">Assembly</div>
-        </div>
         <div class="code-scroll scrollable">
-          <div class="code-view active" id="view-c">
-            <!-- filled by JS -->
-          </div>
-          <div class="code-view" id="view-asm">
+          <div id="view-asm">
             <!-- filled by JS -->
           </div>
         </div>
@@ -552,361 +495,487 @@
     </div>
 
     <script>
-      // ─── Código fuente C ───────────────────────────────────────────────────────
-      const C_LINES = [
-        { id: "c0", html: '<span class="kw">int</span> foo(<span class="kw">int</span> x) {' },
-        { id: "c1", html: '  <span class="kw">return</span> x + <span class="imm">1</span>;' },
-        { id: "c2", html: "}" },
-        { id: "c3", html: "" },
-        { id: "c4", html: '<span class="kw">int</span> baz(<span class="kw">int</span> y) {' },
+      // ─── Programs ──────────────────────────────────────────────────────────────
+      // To add a new program: append an entry to this array.
+      // functions: object mapping name → array of instruction strings (in order).
+      // The first function listed determines the lowest address block.
+      const PROGRAMS = [
         {
-          id: "c5",
-          html: '  <span class="kw">return</span> <span class="fn">foo</span>(<span class="imm">1</span>) + y;',
+          name: "baz llama a foo",
+          entryPoint: "baz",
+          initialRegs: { sp: 0x1000, ra: 0x8050, a0: 3, s0: 2 },
+          baseAddress: 0x8000,
+          functions: {
+            foo: [
+              "addi a0, a0, 1",
+              "ret"
+            ],
+            baz: [
+              "addi sp, sp, -16",
+              "sw   ra, 12(sp)",
+              "sw   s0, 8(sp)",
+              "mv   s0, a0",
+              "li   a0, 1",
+              "call foo",
+              "add  a0, a0, s0",
+              "lw   ra, 12(sp)",
+              "lw   s0, 8(sp)",
+              "addi sp, sp, 16",
+              "ret"
+            ]
+          }
         },
-        { id: "c6", html: "}" },
+        {
+          name: "función hoja simple",
+          entryPoint: "double",
+          initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5, s0: 0 },
+          baseAddress: 0x8000,
+          functions: {
+            double: [
+              "add  a0, a0, a0",
+              "ret"
+            ]
+          }
+        }
       ];
 
-      // ─── Assembly RISC-V ───────────────────────────────────────────────────────
-      const ASM_LINES = [
-        { id: "a_flbl", html: '<span class="lbl">foo:</span>' },
-        {
-          id: "a0",
-          addr: "0x8000",
-          html: '  <span class="kw">addi</span> <span class="reg">a0</span>, <span class="reg">a0</span>, <span class="imm">1</span>',
-        },
-        { id: "a1", addr: "0x8004", html: '  <span class="kw">ret</span>' },
-        { id: "a2", html: "" },
-        { id: "a_blbl", html: '<span class="lbl">baz:</span>' },
-        {
-          id: "a3",
-          addr: "0x8010",
-          html: '  <span class="kw">addi</span> <span class="reg">sp</span>, <span class="reg">sp</span>, <span class="imm">-16</span>',
-        },
-        {
-          id: "a4",
-          addr: "0x8014",
-          html: '  <span class="kw">sw</span>   <span class="reg">ra</span>, <span class="imm">12</span>(<span class="reg">sp</span>)',
-        },
-        {
-          id: "a5",
-          addr: "0x8018",
-          html: '  <span class="kw">sw</span>   <span class="reg">s0</span>, <span class="imm">8</span>(<span class="reg">sp</span>)',
-        },
-        {
-          id: "a6",
-          addr: "0x801C",
-          html: '  <span class="kw">mv</span>   <span class="reg">s0</span>, <span class="reg">a0</span>',
-        },
-        {
-          id: "a7",
-          addr: "0x8020",
-          html: '  <span class="kw">li</span>   <span class="reg">a0</span>, <span class="imm">1</span>',
-        },
-        {
-          id: "a8",
-          addr: "0x8024",
-          html: '  <span class="kw">call</span> <span class="fn">foo</span>',
-        },
-        {
-          id: "a9",
-          addr: "0x8028",
-          html: '  <span class="kw">add</span>  <span class="reg">a0</span>, <span class="reg">a0</span>, <span class="reg">s0</span>',
-        },
-        {
-          id: "a10",
-          addr: "0x802C",
-          html: '  <span class="kw">lw</span>   <span class="reg">ra</span>, <span class="imm">12</span>(<span class="reg">sp</span>)',
-        },
-        {
-          id: "a11",
-          addr: "0x8030",
-          html: '  <span class="kw">lw</span>   <span class="reg">s0</span>, <span class="imm">8</span>(<span class="reg">sp</span>)',
-        },
-        {
-          id: "a12",
-          addr: "0x8034",
-          html: '  <span class="kw">addi</span> <span class="reg">sp</span>, <span class="reg">sp</span>, <span class="imm">16</span>',
-        },
-        { id: "a13", addr: "0x8038", html: '  <span class="kw">ret</span>' },
+      // ─── Constants ────────────────────────────────────────────────────────────
+      const REG_SET = new Set([
+        'zero','ra','sp','gp','tp','fp',
+        'a0','a1','a2','a3','a4','a5','a6','a7',
+        's0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11',
+        't0','t1','t2','t3','t4','t5','t6'
+      ]);
+      const ALL_REGS = [
+        'zero','ra','sp','gp','tp',
+        'a0','a1','a2','a3','a4','a5','a6','a7',
+        's0','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11',
+        't0','t1','t2','t3','t4','t5','t6','fp'
       ];
-
-      // ─── Pasos ─────────────────────────────────────────────────────────────────
-      const BASE = 0x1000;
-      const BAZ_SP = BASE - 16; // 0xFF0
-      const PREV_S0 = "0x0002";
+      // Colors cycling per frame depth (index 0 = outermost active frame)
+      const FRAME_COLORS = [
+        'var(--green-dim)',
+        'var(--blue-dim)',
+        'var(--orange-dim)',
+        'var(--purple-dim)'
+      ];
       const GHOST_ROWS = 3;
-      const CALLER_REAL_TOP = BASE + 4; // address of the topmost real caller slot
+      const OFFSET_MAX = 64; // only show sp±N labels within this range
 
-      const h = (v) => "0x" + v.toString(16).toUpperCase().padStart(4, "0");
+      // ─── Helpers ──────────────────────────────────────────────────────────────
+      const hx = (v) => "0x" + (v >>> 0).toString(16).toUpperCase().padStart(4, "0");
 
-      // Cada paso define: descripción, líneas resaltadas (c y asm), registros, estado de la pila
-      const STEPS = [
-        // 0 ── Estado inicial
-        {
-          desc: "Un <b>caller desconocido</b> llama a <code>baz(3)</code>. El argumento y=3 está en <code>a0</code>. <code>sp</code> apunta al tope del frame del caller y <code>ra</code> = <code>0x8050</code> contiene la dirección de retorno al caller.",
-          cHl: [],
-          aHl: [],
-          regs: { sp: h(BASE), ra: "0x8050", a0: "3", s0: PREV_S0 },
-          hiReg: ["sp", "ra", "a0"],
-          caller: true,
-          bazReserved: false,
-          bazRa: "—",
-          bazS0: "—",
-          hiSlots: [],
-          spAt: "caller",
-        },
-        // 1 ── baz: addi sp, sp, -16
-        {
-          desc: "<b>Prólogo de baz</b>: <code>addi sp, sp, -16</code> — el stack pointer baja 16 bytes para reservar espacio para el frame de baz. La pila crece hacia abajo.",
-          cHl: ["c4"],
-          aHl: ["a3"],
-          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: PREV_S0 },
-          hiReg: ["sp"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "—",
-          bazS0: "—",
-          hiSlots: [],
-          spAt: "baz",
-        },
-        // 2 ── baz: sw ra, 12(sp)
-        {
-          desc: "<b>Prólogo de baz</b>: <code>sw ra, 12(sp)</code> — guarda <code>ra</code> (0x8050) en <code>sp+12</code> (dirección 0xFFC). Esto es <b>obligatorio</b> porque <code>call foo</code> sobreescribirá <code>ra</code>.",
-          cHl: ["c4"],
-          aHl: ["a4"],
-          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: PREV_S0 },
-          hiReg: ["ra"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: "—",
-          hiSlots: ["baz-ra"],
-          spAt: "baz",
-        },
-        // 3 ── baz: sw s0, 8(sp)
-        {
-          desc: "<b>Prólogo de baz</b>: <code>sw s0, 8(sp)</code> — guarda <code>s0</code> en <code>sp+8</code> (dirección 0xFF8). En RISC-V, <code>s0–s11</code> son <b>callee-saved</b>: baz planea usar <code>s0</code> para guardar <code>y</code>, así que primero debe preservar su valor anterior.",
-          cHl: ["c4"],
-          aHl: ["a5"],
-          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: PREV_S0 },
-          hiReg: ["s0"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: ["baz-s0"],
-          spAt: "baz",
-        },
-        // 4 ── baz: mv s0, a0
-        {
-          desc: "<b>baz guarda y en s0</b>: <code>mv s0, a0</code> — copia el argumento y=3 desde <code>a0</code> a <code>s0</code>. Como <code>call foo</code> usará <code>a0</code> para pasar el argumento a foo y recibirá el resultado, baz necesita guardar <code>y</code> en un registro que sobreviva la llamada. <code>s0</code> es callee-saved, así que foo está obligado a preservarlo.",
-          cHl: ["c5"],
-          aHl: ["a6"],
-          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: "3" },
-          hiReg: ["s0"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: [],
-          spAt: "baz",
-        },
-        // 5 ── baz: li a0, 1
-        {
-          desc: "<b>baz prepara el argumento</b>: <code>li a0, 1</code> — carga el entero 1 en <code>a0</code>. En RISC-V, el primer argumento se pasa por <code>a0</code>.",
-          cHl: ["c5"],
-          aHl: ["a7"],
-          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "1", s0: "3" },
-          hiReg: ["a0"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: [],
-          spAt: "baz",
-        },
-        // 6 ── baz: call foo
-        {
-          desc: "<b>baz llama a foo</b>: <code>call foo</code> escribe la dirección de retorno a baz en <code>ra</code> (0x8028) y salta a <code>foo</code>. El <code>ra</code> anterior (0x8050) está a salvo en la pila. <b>foo es una función hoja</b>: no llama a nadie más, así que no necesita guardar <code>ra</code> ni reservar frame.",
-          cHl: ["c5"],
-          aHl: ["a8"],
-          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "1", s0: "3" },
-          hiReg: ["ra"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: [],
-          spAt: "baz",
-        },
-        // 7 ── foo: addi a0, a0, 1
-        {
-          desc: "<b>Cuerpo de foo</b>: <code>addi a0, a0, 1</code> — calcula x+1 = 1+1 = 2 y lo deja en <code>a0</code>. Nótese que <b>sp no cambió</b>: foo no tiene frame propio. El puntero de pila permanece en 0xFF0.",
-          cHl: ["c1"],
-          aHl: ["a0"],
-          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "2", s0: "3" },
-          hiReg: ["a0"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: [],
-          spAt: "baz",
-        },
-        // 8 ── foo: ret
-        {
-          desc: "<b>foo retorna</b>: <code>ret</code> salta a <code>ra</code> (0x8028). El control vuelve a baz justo después de <code>call foo</code>. El resultado 2 está en <code>a0</code>. Como foo no modificó <code>sp</code>, no hay epílogo — simplemente retorna.",
-          cHl: ["c5"],
-          aHl: ["a1"],
-          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "2", s0: "3" },
-          hiReg: ["a0"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: [],
-          spAt: "baz",
-        },
-        // 9 ── baz: add a0, a0, s0
-        {
-          desc: "<b>baz combina los resultados</b>: <code>add a0, a0, s0</code> — suma el valor de retorno de foo (2) con <code>s0</code> (que guardaba y=3). <code>a0</code> = 2 + 3 = <b>5</b>. Este será el valor de retorno de baz.",
-          cHl: ["c5"],
-          aHl: ["a9"],
-          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "5", s0: "3" },
-          hiReg: ["a0"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: [],
-          spAt: "baz",
-        },
-        // 10 ── baz: lw ra, 12(sp)
-        {
-          desc: "<b>Epílogo de baz</b>: <code>lw ra, 12(sp)</code> restaura <code>ra</code> = <code>0x8050</code> desde la pila. <code>s0</code> todavía no se ha restaurado.",
-          cHl: ["c6"],
-          aHl: ["a10"],
-          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "5", s0: "3" },
-          hiReg: ["ra"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: ["baz-ra"],
-          spAt: "baz",
-        },
-        // 11 ── baz: lw s0, 8(sp)
-        {
-          desc: "<b>Epílogo de baz</b>: <code>lw s0, 8(sp)</code> restaura el valor original de <code>s0</code> = <code>0x0002</code>. Los registros callee-saved quedan exactamente igual que antes de entrar a baz.",
-          cHl: ["c6"],
-          aHl: ["a11"],
-          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "5", s0: PREV_S0 },
-          hiReg: ["s0"],
-          caller: true,
-          bazReserved: true,
-          bazRa: "0x8050",
-          bazS0: PREV_S0,
-          hiSlots: ["baz-s0"],
-          spAt: "baz",
-        },
-        // 12 ── baz: addi sp, sp, 16
-        {
-          desc: "<b>Epílogo de baz</b>: <code>addi sp, sp, 16</code> libera el frame — <code>sp</code> sube de vuelta a <code>0x1000</code>. El frame de baz desaparece de la pila.",
-          cHl: ["c6"],
-          aHl: ["a12"],
-          regs: { sp: h(BASE), ra: "0x8050", a0: "5", s0: PREV_S0 },
-          hiReg: ["sp"],
-          caller: true,
-          bazReserved: false,
-          bazRa: "—",
-          bazS0: "—",
-          hiSlots: [],
-          spAt: "caller",
-        },
-        // 13 ── baz: ret
-        {
-          desc: "<b>baz retorna</b>: <code>ret</code> salta a <code>ra</code> (0x8050), volviendo al caller. La pila quedó <b>exactamente igual</b> que antes de llamar a baz. El resultado final 5 está en <code>a0</code>.",
-          cHl: ["c6"],
-          aHl: ["a13"],
-          regs: { sp: h(BASE), ra: "0x8050", a0: "5", s0: PREV_S0 },
-          hiReg: ["ra", "a0"],
-          caller: true,
-          bazReserved: false,
-          bazRa: "—",
-          bazS0: "—",
-          hiSlots: [],
-          spAt: "caller",
-        },
-      ];
+      // ─── Instruction parser ───────────────────────────────────────────────────
+      function parseInstr(raw) {
+        const s = raw.trim().replace(/\s+/g, ' ');
+        const sp = s.indexOf(' ');
+        const op = sp === -1 ? s : s.slice(0, sp);
+        const argStr = sp === -1 ? '' : s.slice(sp + 1);
+        const args = argStr ? argStr.split(',').map(a => a.trim()) : [];
 
-      // ─── Estado ────────────────────────────────────────────────────────────────
-      let cur = 0;
+        if (op === 'ret') return { op };
+        if (op === 'call' || op === 'j' || op === 'jal') return { op: op === 'jal' ? 'call' : op, target: args[args.length - 1] };
+        if (op === 'li') return { op, rd: args[0], imm: Number(args[1]) };
+        if (op === 'mv') return { op, rd: args[0], rs1: args[1] };
+        if (op === 'neg') return { op, rd: args[0], rs1: args[1] };
+        if (op === 'nop') return { op };
+        if (op === 'addi' || op === 'slli' || op === 'srli' || op === 'srai' || op === 'andi' || op === 'ori' || op === 'xori') {
+          return { op, rd: args[0], rs1: args[1], imm: Number(args[2]) };
+        }
+        if (['add','sub','mul','div','rem','and','or','xor','sll','srl','sra'].includes(op)) {
+          return { op, rd: args[0], rs1: args[1], rs2: args[2] };
+        }
 
-      // ─── Renderizar código ────────────────────────────────────────────────────
-      function buildCode() {
-        const cEl = document.getElementById("view-c");
-        const aEl = document.getElementById("view-asm");
+        // sw/lw/sb/lb/sh/lh: reg, offset(base)
+        if (['sw','lw','sb','lb','sh','lh','lbu','lhu'].includes(op)) {
+          const mem = args[1] && args[1].match(/^(-?\d+)\((\w+)\)$/);
+          if (mem) {
+            if (op === 'sw' || op === 'sb' || op === 'sh') {
+              return { op, rs2: args[0], offset: Number(mem[1]), rs1: mem[2] };
+            }
+            return { op, rd: args[0], offset: Number(mem[1]), rs1: mem[2] };
+          }
+        }
 
-        cEl.innerHTML = C_LINES.map(
-          (l, i) =>
-            `<div class="line" id="cl-${l.id}"><span class="line-num">${i + 1}</span><span>${l.html || " "}</span></div>`,
-        ).join("");
+        // Branches: rs1, rs2, label
+        if (['beq','bne','blt','bge','bltu','bgeu'].includes(op)) {
+          return { op, rs1: args[0], rs2: args[1], target: args[2] };
+        }
 
-        aEl.innerHTML = ASM_LINES.map(
-          (l, i) =>
-            `<div class="line" id="al-${l.id}"><span class="line-num">${i + 1}</span><span class="asm-addr">${l.addr || ""}</span><span>${l.html || " "}</span></div>`,
-        ).join("");
+        return { op, raw: s };
       }
 
-      // ─── Renderizar paso ──────────────────────────────────────────────────────
+      // ─── Assembler: assign addresses ──────────────────────────────────────────
+      function assembleProgram(prog) {
+        const instrs = []; // { fn, addr, raw, ...parsed }
+        const labels = {}; // fn name → first address
+        let addr = prog.baseAddress;
+
+        for (const [fn, lines] of Object.entries(prog.functions)) {
+          labels[fn] = addr;
+          for (const line of lines) {
+            const parsed = parseInstr(line);
+            instrs.push({ fn, addr, raw: line.trim(), ...parsed });
+            addr += 4;
+          }
+        }
+        return { instrs, labels };
+      }
+
+      // ─── Syntax highlighter ───────────────────────────────────────────────────
+      function highlightInstr(raw) {
+        const s = raw.trim();
+        const sp = s.indexOf(' ');
+        const op = sp === -1 ? s : s.slice(0, sp);
+        const rest = sp === -1 ? '' : s.slice(sp + 1);
+
+        let html = `<span class="kw">${op}</span>`;
+        if (!rest) return html;
+
+        const tokenHtml = (tok) => {
+          const t = tok.trim();
+          const memM = t.match(/^(-?\d+)\((\w+)\)$/);
+          if (memM) return `<span class="imm">${memM[1]}</span>(<span class="reg">${memM[2]}</span>)`;
+          if (REG_SET.has(t)) return `<span class="reg">${t}</span>`;
+          if (/^-?\d+$/.test(t)) return `<span class="imm">${t}</span>`;
+          return `<span class="fn">${t}</span>`;
+        };
+
+        const toks = rest.split(',');
+        html += ' ' + toks.map((tok, i) => tokenHtml(tok) + (i < toks.length - 1 ? ',' : '')).join(' ');
+        return html;
+      }
+
+      // ─── Simulator ────────────────────────────────────────────────────────────
+      function simulate(prog) {
+        const { instrs, labels } = assembleProgram(prog);
+        const addrMap = new Map(instrs.map(i => [i.addr, i]));
+
+        // Initialize registers (all zero, then apply initialRegs)
+        const regs = {};
+        for (const r of ALL_REGS) regs[r] = 0;
+        regs.zero = 0;
+        for (const [k, v] of Object.entries(prog.initialRegs)) regs[k] = v;
+        // s0 and fp are the same hardware register (x8)
+        regs.fp = regs.s0;
+
+        const mem = new Map();        // addr (number) → value (number)
+        const slotLabels = new Map(); // addr (number) → saved register name string
+
+        let pc = labels[prog.entryPoint];
+
+        // callStack: [{fn, entrySpBefore, allocatedSize}]
+        // entrySpBefore: sp at the moment this function was entered
+        // allocatedSize: bytes allocated by prologue (entrySpBefore - currentSp when inside frame)
+        const callStack = [{ fn: prog.entryPoint, entrySpBefore: regs.sp, allocatedSize: 0 }];
+
+        const steps = [];
+
+        function snap() {
+          return {
+            regs: { ...regs },
+            mem: new Map(mem),
+            slotLabels: new Map(slotLabels),
+            callStack: callStack.map(f => ({ ...f })),
+            pc,
+          };
+        }
+
+        function makeStep(s, desc, hiReg, hiSlots, instrAddr) {
+          return {
+            desc,
+            aHl: instrAddr != null ? [instrAddr] : [],
+            regs: s.regs,
+            hiReg: hiReg || [],
+            mem: s.mem,
+            hiSlots: hiSlots || [],
+            slotLabels: s.slotLabels,
+            callStack: s.callStack,
+          };
+        }
+
+        function syncFpS0(rd) {
+          if (rd === 's0') regs.fp = regs.s0;
+          if (rd === 'fp') regs.s0 = regs.fp;
+        }
+
+        // Emit initial step (state before first instruction)
+        steps.push(makeStep(snap(),
+          `La función <code>${prog.entryPoint}</code> es llamada con <code>a0</code> = ${regs.a0}. ` +
+          `<code>sp</code> = <code>${hx(regs.sp)}</code>, <code>ra</code> = <code>${hx(regs.ra)}</code> (dirección de retorno al caller).`,
+          ['sp', 'ra', 'a0'], [], null));
+
+        // Format a register value for use in description text
+        const ADDR_REGS = new Set(['ra', 'sp', 'fp', 'gp', 'tp']);
+        const fmtVal = (name, val) => ADDR_REGS.has(name) ? hx(val) : String(val);
+
+        const MAX_STEPS = 500;
+
+        while (steps.length < MAX_STEPS) {
+          const instr = addrMap.get(pc);
+          if (!instr) break;
+
+          const prev = { ...regs };
+          const instrAddr = pc;
+          let desc = '', hiReg = [], hiSlots = [];
+          let stepPushed = false; // set by ret to avoid double-push
+
+          switch (instr.op) {
+            case 'addi':
+            case 'andi':
+            case 'ori':
+            case 'xori': {
+              const ops = { addi: (a,b) => a+b, andi: (a,b) => a&b, ori: (a,b) => a|b, xori: (a,b) => a^b };
+              const val = ops[instr.op](regs[instr.rs1], instr.imm);
+              regs[instr.rd] = val;
+              syncFpS0(instr.rd);
+              pc += 4;
+              hiReg = [instr.rd];
+
+              if (instr.op === 'addi' && instr.rd === 'sp') {
+                const top = callStack[callStack.length - 1];
+                top.allocatedSize = top.entrySpBefore - val;
+                if (instr.imm < 0)
+                  desc = `<b>Prólogo</b>: <code>addi sp, sp, ${instr.imm}</code> — reserva ${-instr.imm} bytes en la pila. <code>sp</code> baja a <code>${hx(val)}</code>.`;
+                else
+                  desc = `<b>Epílogo</b>: <code>addi sp, sp, +${instr.imm}</code> — libera ${instr.imm} bytes. <code>sp</code> sube a <code>${hx(val)}</code>.`;
+              } else {
+                desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} ${instr.op === 'addi' ? '+' : ''} ${instr.imm} = <b>${val}</b>.`;
+              }
+              break;
+            }
+
+            case 'slli':
+            case 'srli':
+            case 'srai': {
+              const ops = { slli: (a,b) => a<<b, srli: (a,b) => a>>>b, srai: (a,b) => a>>b };
+              const val = ops[instr.op](regs[instr.rs1], instr.imm);
+              regs[instr.rd] = val;
+              syncFpS0(instr.rd);
+              pc += 4;
+              hiReg = [instr.rd];
+              desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} shift ${instr.imm} = <b>${val}</b>.`;
+              break;
+            }
+
+            case 'add':
+            case 'sub':
+            case 'mul':
+            case 'div':
+            case 'rem':
+            case 'and':
+            case 'or':
+            case 'xor':
+            case 'sll':
+            case 'srl':
+            case 'sra': {
+              const ops = {
+                add: (a,b) => a+b, sub: (a,b) => a-b, mul: (a,b) => a*b,
+                div: (a,b) => b === 0 ? 0 : Math.trunc(a/b), rem: (a,b) => b === 0 ? a : a%b,
+                and: (a,b) => a&b, or: (a,b) => a|b, xor: (a,b) => a^b,
+                sll: (a,b) => a<<b, srl: (a,b) => a>>>b, sra: (a,b) => a>>b
+              };
+              const syms = { add:'+', sub:'-', mul:'×', div:'÷', rem:'%', and:'&', or:'|', xor:'^', sll:'<<', srl:'>>>', sra:'>>' };
+              const val = ops[instr.op](regs[instr.rs1], regs[instr.rs2]);
+              regs[instr.rd] = val;
+              syncFpS0(instr.rd);
+              pc += 4;
+              hiReg = [instr.rd];
+              desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.rs2}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} ${syms[instr.op]} ${prev[instr.rs2]} = <b>${val}</b>.`;
+              break;
+            }
+
+            case 'sw':
+            case 'sb':
+            case 'sh': {
+              const addr = regs[instr.rs1] + instr.offset;
+              mem.set(addr, regs[instr.rs2]);
+              slotLabels.set(addr, instr.rs2);
+              pc += 4;
+              hiSlots = [addr];
+              desc = `<code>${instr.op} ${instr.rs2}, ${instr.offset}(${instr.rs1})</code> — guarda <code>${instr.rs2}</code> = ${fmtVal(instr.rs2, regs[instr.rs2])} en dirección <code>${hx(addr)}</code>.`;
+              break;
+            }
+
+            case 'lw':
+            case 'lb':
+            case 'lh':
+            case 'lbu':
+            case 'lhu': {
+              const addr = regs[instr.rs1] + instr.offset;
+              const val = mem.get(addr) ?? 0;
+              regs[instr.rd] = val;
+              syncFpS0(instr.rd);
+              pc += 4;
+              hiReg = [instr.rd];
+              hiSlots = [addr];
+              desc = `<code>${instr.op} ${instr.rd}, ${instr.offset}(${instr.rs1})</code> — restaura <code>${instr.rd}</code> = <b>${fmtVal(instr.rd, val)}</b> desde dirección <code>${hx(addr)}</code>.`;
+              break;
+            }
+
+            case 'mv': {
+              regs[instr.rd] = regs[instr.rs1];
+              syncFpS0(instr.rd);
+              pc += 4;
+              hiReg = [instr.rd];
+              desc = `<code>mv ${instr.rd}, ${instr.rs1}</code> — <code>${instr.rd}</code> ← <code>${instr.rs1}</code> = <b>${prev[instr.rs1]}</b>.`;
+              break;
+            }
+
+            case 'neg': {
+              regs[instr.rd] = -regs[instr.rs1];
+              syncFpS0(instr.rd);
+              pc += 4;
+              hiReg = [instr.rd];
+              desc = `<code>neg ${instr.rd}, ${instr.rs1}</code> — <code>${instr.rd}</code> = -${prev[instr.rs1]} = <b>${regs[instr.rd]}</b>.`;
+              break;
+            }
+
+            case 'li': {
+              regs[instr.rd] = instr.imm;
+              syncFpS0(instr.rd);
+              pc += 4;
+              hiReg = [instr.rd];
+              desc = `<code>li ${instr.rd}, ${instr.imm}</code> — carga el inmediato <b>${instr.imm}</b> en <code>${instr.rd}</code>.`;
+              break;
+            }
+
+            case 'call': {
+              const target = labels[instr.target];
+              if (target == null) { pc += 4; desc = `<code>call ${instr.target}</code> — función no encontrada.`; break; }
+              regs.ra = pc + 4;
+              pc = target;
+              callStack.push({ fn: instr.target, entrySpBefore: regs.sp, allocatedSize: 0 });
+              hiReg = ['ra'];
+              desc = `<code>call ${instr.target}</code> — guarda dirección de retorno en <code>ra</code> = <code>${hx(regs.ra)}</code> y salta a <code>${instr.target}</code>.`;
+              break;
+            }
+
+            case 'j': {
+              const target = labels[instr.target];
+              if (target == null) { pc += 4; desc = `<code>j ${instr.target}</code> — etiqueta no encontrada.`; break; }
+              pc = target;
+              desc = `<code>j ${instr.target}</code> — salta incondicionalmente a <code>${instr.target}</code>.`;
+              break;
+            }
+
+            case 'beq':
+            case 'bne':
+            case 'blt':
+            case 'bge':
+            case 'bltu':
+            case 'bgeu': {
+              const conds = {
+                beq: (a,b) => a===b, bne: (a,b) => a!==b,
+                blt: (a,b) => a<b,   bge: (a,b) => a>=b,
+                bltu: (a,b) => (a>>>0)<(b>>>0), bgeu: (a,b) => (a>>>0)>=(b>>>0)
+              };
+              const taken = conds[instr.op](regs[instr.rs1], regs[instr.rs2]);
+              const target = labels[instr.target];
+              pc = taken && target != null ? target : pc + 4;
+              desc = `<code>${instr.op} ${instr.rs1}, ${instr.rs2}, ${instr.target}</code> — ${regs[instr.rs1]} vs ${regs[instr.rs2]}: rama ${taken ? '<b>tomada</b>' : 'no tomada'}.`;
+              break;
+            }
+
+            case 'nop': {
+              pc += 4;
+              desc = `<code>nop</code> — no operation.`;
+              break;
+            }
+
+            case 'ret': {
+              const retAddr = regs.ra;
+              pc = retAddr;
+              callStack.pop();
+              hiReg = ['ra', 'a0'];
+              desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(retAddr)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
+              steps.push(makeStep(snap(), desc, hiReg, hiSlots, instrAddr));
+              stepPushed = true;
+              break;
+            }
+
+            default: {
+              pc += 4;
+              desc = `<code>${instr.raw ?? instr.op}</code>`;
+              break;
+            }
+          }
+
+          if (!stepPushed) steps.push(makeStep(snap(), desc, hiReg, hiSlots, instrAddr));
+
+          // Stop if we've returned from the top-level function
+          if (callStack.length === 0) break;
+        }
+
+        return steps;
+      }
+
+      // ─── Build assembly view ───────────────────────────────────────────────────
+      function buildAsmView(prog) {
+        const { instrs } = assembleProgram(prog);
+        const el = document.getElementById("view-asm");
+        let lineNum = 1;
+        let html = '';
+        let lastFn = null;
+
+        for (const instr of instrs) {
+          if (instr.fn !== lastFn) {
+            if (lastFn !== null) {
+              html += `<div class="line"><span class="line-num"></span><span class="asm-addr"></span><span> </span></div>`;
+            }
+            html += `<div class="line"><span class="line-num">${lineNum++}</span><span class="asm-addr"></span><span class="lbl">${instr.fn}:</span></div>`;
+            lastFn = instr.fn;
+          }
+          html += `<div class="line" id="al-${instr.addr.toString(16)}"><span class="line-num">${lineNum++}</span><span class="asm-addr">${hx(instr.addr)}</span><span>  ${highlightInstr(instr.raw)}</span></div>`;
+        }
+
+        el.innerHTML = html;
+      }
+
+      // ─── Render ───────────────────────────────────────────────────────────────
+      const DISPLAY_REGS = [
+        { name: "sp", desc: "stack pointer",    key: "sp" },
+        { name: "ra", desc: "dirección retorno", key: "ra" },
+        { name: "a0", desc: "arg / retorno",    key: "a0" },
+        { name: "s0", desc: "callee-saved",     key: "s0" },
+        { name: "a1", desc: "arg 2",            key: "a1" },
+        { name: "t0", desc: "temporal",         key: "t0" },
+        { name: "t1", desc: "temporal",         key: "t1" },
+        { name: "fp", desc: "frame pointer",    key: "fp" },
+      ];
+
+      function fmtRegVal(key, val) {
+        if (val == null) return RAND_REGS[key] ?? '?';
+        if (key === 'sp' || key === 'ra' || key === 'fp' || key === 'gp' || key === 'tp') return hx(val);
+        return String(val);
+      }
+
       function render(s) {
-        // Descripción
+        // Description
         document.getElementById("desc-text").innerHTML = s.desc;
 
-        // Resaltado código C
-        C_LINES.forEach((l) => {
-          const el = document.getElementById("cl-" + l.id);
-          if (el) el.classList.toggle("hl", s.cHl.includes(l.id));
-        });
-
-        // Resaltado assembly
-        ASM_LINES.forEach((l) => {
-          const el = document.getElementById("al-" + l.id);
-          if (el) el.classList.toggle("hl", s.aHl.includes(l.id));
-        });
-
-        // Scroll auto al primer renglón resaltado
-        const firstCHl = s.cHl[0] ? document.getElementById("cl-" + s.cHl[0]) : null;
-        if (firstCHl && document.getElementById("view-c").classList.contains("active")) {
-          firstCHl.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        }
-        const firstAHl = s.aHl[0] ? document.getElementById("al-" + s.aHl[0]) : null;
-        if (firstAHl && document.getElementById("view-asm").classList.contains("active")) {
-          firstAHl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        // Assembly highlight — keyed by instruction address
+        document.querySelectorAll("#view-asm .line.hl").forEach(el => el.classList.remove('hl'));
+        for (const addr of (s.aHl || [])) {
+          const el = document.getElementById("al-" + addr.toString(16));
+          if (el) {
+            el.classList.add('hl');
+            el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
         }
 
-        // Registros
-        const REGS = [
-          { name: "sp", desc: "stack pointer", key: "sp" },
-          { name: "ra", desc: "dirección retorno", key: "ra" },
-          { name: "a0", desc: "arg / retorno", key: "a0" },
-          { name: "s0", desc: "callee-saved", key: "s0" },
-          { name: "a1", desc: "arg 2", key: "a1" },
-          { name: "t0", desc: "temporal", key: "t0" },
-          { name: "t1", desc: "temporal", key: "t1" },
-          { name: "fp", desc: "frame pointer", key: "fp" },
-        ];
+        // Registers
         const hiR = new Set(s.hiReg || []);
-        document.getElementById("reg-list").innerHTML = REGS.map((r) => {
-          const val = s.regs[r.key] ?? RAND_REGS[r.key];
-          return `<div class="reg-row${hiR.has(r.name) ? " hi" : ""}">
-      <span class="reg-name">${r.name}</span>
-      <span class="reg-val">${val}</span>
-      <span class="reg-desc">${r.desc}</span>
-    </div>`;
-        }).join("");
+        document.getElementById("reg-list").innerHTML = DISPLAY_REGS.map(r => {
+          const val = s.regs ? s.regs[r.key] : null;
+          return `<div class="reg-row${hiR.has(r.name) ? ' hi' : ''}">
+            <span class="reg-name">${r.name}</span>
+            <span class="reg-val">${fmtRegVal(r.key, val)}</span>
+            <span class="reg-desc">${r.desc}</span>
+          </div>`;
+        }).join('');
 
-        // Pila
+        // Stack
         buildStack(s);
         requestAnimationFrame(() => {
           positionSpArrow(s);
@@ -914,212 +983,215 @@
           positionOffsets(s);
         });
 
-        // Controles
+        // Controls
         document.getElementById("step-counter").textContent = `${cur + 1} / ${STEPS.length}`;
-        document.getElementById("progress-fill").style.width =
-          ((cur + 1) / STEPS.length) * 100 + "%";
+        document.getElementById("progress-fill").style.width = ((cur + 1) / STEPS.length * 100) + '%';
         document.getElementById("btn-prev").disabled = cur === 0;
         document.getElementById("btn-next").disabled = cur === STEPS.length - 1;
       }
 
+      // ─── Stack builder ────────────────────────────────────────────────────────
+      // Slot IDs use lowercase hex address: "slot-ff0", "slot-1000", etc.
       function buildStack(s) {
         const hiS = new Set(s.hiSlots || []);
         const col = document.getElementById("stack-column");
+        const currentSp = s.regs ? s.regs.sp : 0;
+        const callerBase = s.callStack && s.callStack.length > 0 ? s.callStack[0].entrySpBefore : currentSp + 16;
 
-        let html = "";
+        let html = '';
 
-        // Frame caller — elipsis + 4 slots con direcciones reales
-        let callerGhosts = "";
+        // ── Top ghost: caller frame ──
+        let callerSlots = '';
         for (let i = 0; i < GHOST_ROWS; i++) {
-          const addr = CALLER_REAL_TOP + (GHOST_ROWS - i) * 4;
+          const addr = callerBase + (GHOST_ROWS - i) * 4;
           const opacity = ((i + 1) / (GHOST_ROWS + 1)).toFixed(2);
-          callerGhosts += `<div class="frame-slot" id="caller-ghost-${i}" style="opacity:${opacity}"><span class="slot-name">${h(addr)}</span><span class="slot-val">—</span></div>`;
+          callerSlots += `<div class="frame-slot" id="slot-${addr.toString(16)}" style="opacity:${opacity}">` +
+            `<span class="slot-name">${hx(addr)}</span><span class="slot-val">—</span></div>`;
+        }
+        // The slot at callerBase itself (boundary)
+        callerSlots += `<div class="frame-slot" id="slot-${callerBase.toString(16)}">` +
+          `<span class="slot-name">${hx(callerBase)}</span>` +
+          `<span class="slot-val" style="color:var(--text-faint)">—</span></div>`;
+
+        html += `<div class="frame caller" id="fr-caller">
+          <div class="frame-ellipsis"><div>dirección alta</div><div>↑</div></div>
+          ${callerSlots}
+        </div>`;
+
+        // ── Active frames: oldest (index 0) to newest ──
+        const activeFrames = (s.callStack || []).filter(f => f.allocatedSize > 0);
+        for (let fi = 0; fi < activeFrames.length; fi++) {
+          const frame = activeFrames[fi];
+          const color = FRAME_COLORS[fi % FRAME_COLORS.length];
+          const frameTop = frame.entrySpBefore;
+          const frameBot = frame.entrySpBefore - frame.allocatedSize;
+
+          let frameSlots = '';
+          for (let addr = frameTop - 4; addr >= frameBot; addr -= 4) {
+            const label = s.slotLabels && s.slotLabels.get(addr);
+            const val = s.mem && s.mem.get(addr);
+            const slotName = label ? `${hx(addr)}&nbsp;&nbsp;${label}` : hx(addr);
+            const slotVal = val !== undefined ? String(val) : '—';
+            const isHi = hiS.has(addr);
+            const bg = isHi ? 'var(--orange-dim)' : color;
+            const nameColor = label ? 'var(--blue)' : '';
+            frameSlots += `<div class="frame-slot" id="slot-${addr.toString(16)}" style="background:${bg}">` +
+              `<span class="slot-name"${nameColor ? ` style="color:${nameColor}"` : ''}>${slotName}</span>` +
+              `<span class="slot-val">${slotVal}</span></div>`;
+          }
+
+          html += `<div class="frame" id="fr-active-${fi}" data-fn="${frame.fn}">${frameSlots}</div>`;
         }
 
-        html += `<div class="frame caller${s.caller ? "" : " hidden"}" id="fr-caller">
-    <div class="frame-ellipsis"><div>dirección alta</div><div>↑</div></div>
-    ${callerGhosts}
-    <div class="frame-slot" id="caller-4">
-      <span class="slot-name">${h(BASE + 4)}</span>
-      <span class="slot-val" style="color:var(--text-faint)">—</span>
-    </div>
-    <div class="frame-slot" id="caller-0">
-      <span class="slot-name">${h(BASE)}</span>
-      <span class="slot-val" style="color:var(--text-faint)">—</span>
-    </div>
-  </div>`;
-
-        // Frame baz — 4 slots, high-to-low in DOM
-        // 0xFFC ra (sp+12), 0xFF8 s0 (sp+8), 0xFF4 unused (sp+4), 0xFF0 unused (sp+0 = sp)
-        const bazRaLabel = s.bazReserved ? `${h(BAZ_SP + 12)} &nbsp;ra` : h(BAZ_SP + 12);
-        const bazS0Label = s.bazReserved ? `${h(BAZ_SP + 8)} &nbsp;s0` : h(BAZ_SP + 8);
-        html += `<div class="frame baz${s.bazReserved ? " reserved" : ""}" id="fr-baz">
-    <div class="frame-slot${hiS.has("baz-ra") ? " hi" : ""}" id="baz-ra">
-      <span class="slot-name">${bazRaLabel}</span>
-      <span class="slot-val">${s.bazReserved ? s.bazRa : "—"}</span>
-    </div>
-    <div class="frame-slot${hiS.has("baz-s0") ? " hi" : ""}" id="baz-s0">
-      <span class="slot-name">${bazS0Label}</span>
-      <span class="slot-val">${s.bazReserved ? s.bazS0 : "—"}</span>
-    </div>
-    <div class="frame-slot" id="baz-pad1">
-      <span class="slot-name">${h(BAZ_SP + 4)}</span>
-      <span class="slot-val">—</span>
-    </div>
-    <div class="frame-slot" id="baz-pad0">
-      <span class="slot-name">${h(BAZ_SP)}</span>
-      <span class="slot-val">—</span>
-    </div>
-  </div>`;
-
-        // Free zone — unallocated memory below baz's frame
+        // ── Bottom ghost: free zone below sp ──
+        let freeSlots = '';
+        for (let i = 0; i < GHOST_ROWS; i++) {
+          const addr = currentSp - (i + 1) * 4;
+          const opacity = ((GHOST_ROWS - i) / (GHOST_ROWS + 1)).toFixed(2);
+          freeSlots += `<div class="frame-slot" style="opacity:${opacity};background:var(--bg);border-top-style:dashed">` +
+            `<span class="slot-name" style="color:var(--text-faint)">${hx(addr)}</span>` +
+            `<span class="slot-val" style="color:var(--text-faint)">—</span></div>`;
+        }
         html += `<div class="frame free" id="fr-free">
-    ${(() => { let g = ""; for (let i = 0; i < GHOST_ROWS; i++) { const addr = BAZ_SP - 12 - (i + 1) * 4; const opacity = ((GHOST_ROWS - i) / (GHOST_ROWS + 1)).toFixed(2); g += `<div class="frame-slot" style="opacity:${opacity}"><span class="slot-name">${h(addr)}</span><span class="slot-val">—</span></div>`; } return g; })()}
-    <div class="frame-ellipsis"><div>↓</div><div>dirección baja</div></div>
-  </div>`;
+          ${freeSlots}
+          <div class="frame-ellipsis"><div>↓</div><div>dirección baja</div></div>
+        </div>`;
 
         col.innerHTML = html;
       }
 
+      // ─── SP arrow ─────────────────────────────────────────────────────────────
       let _firstArrowRender = true;
 
       function positionSpArrow(s) {
         const arrow = document.getElementById("sp-arrow");
         const wrapper = document.getElementById("stack-wrapper");
-        const frameId = { caller: "fr-caller", baz: "fr-baz", foo: "fr-foo" }[s.spAt];
-        const frame = document.getElementById(frameId);
-        if (!arrow || !wrapper || !frame) return;
+        if (!arrow || !wrapper) return;
 
-        const slots = frame.querySelectorAll(".frame-slot");
-        const hdr = slots[slots.length - 1] || frame;
+        const spAddr = s.regs ? s.regs.sp : 0;
+
+        // Find the slot element at the current sp address
+        let target = document.getElementById("slot-" + spAddr.toString(16));
+
+        // Fallback: the boundary slot at callerBase
+        if (!target) {
+          const callerBase = s.callStack && s.callStack.length > 0 ? s.callStack[0].entrySpBefore : spAddr;
+          target = document.getElementById("slot-" + callerBase.toString(16));
+        }
+        if (!target) return;
+
         const wRect = wrapper.getBoundingClientRect();
-        const hRect = hdr.getBoundingClientRect();
-        const top = hRect.top - wRect.top + hRect.height / 2;
+        const tRect = target.getBoundingClientRect();
+        const top = tRect.top - wRect.top + tRect.height / 2;
 
         if (_firstArrowRender) {
-          arrow.style.transition = "none";
-          arrow.style.top = top + "px";
-          arrow.getBoundingClientRect(); // force reflow
-          arrow.style.transition = "";
+          arrow.style.transition = 'none';
+          arrow.style.top = top + 'px';
+          arrow.getBoundingClientRect(); // force reflow before re-enabling transition
+          arrow.style.transition = '';
           _firstArrowRender = false;
         } else {
-          arrow.style.top = top + "px";
+          arrow.style.top = top + 'px';
         }
       }
 
+      // ─── Frame labels ─────────────────────────────────────────────────────────
       function positionLabels(s) {
         const col = document.getElementById("stack-column");
         const labelsEl = document.getElementById("frame-labels");
         if (!col || !labelsEl) return;
 
         const colTop = col.getBoundingClientRect().top;
-        const frames = [
-          { id: "fr-caller", name: "", show: s.caller },
-          { id: "fr-baz", name: "baz(int y)", show: s.bazReserved },
-        ];
+        let html = '';
 
-        let html = "";
-        for (const f of frames) {
-          if (!f.show) continue;
-          const el = document.getElementById(f.id);
-          if (!el) continue;
-          const firstSlot = el.querySelector(".frame-slot") || el;
+        const activeFrames = (s.callStack || []).filter(f => f.allocatedSize > 0);
+        for (let fi = 0; fi < activeFrames.length; fi++) {
+          const frame = activeFrames[fi];
+          const frEl = document.getElementById("fr-active-" + fi);
+          if (!frEl) continue;
+          const firstSlot = frEl.querySelector(".frame-slot");
+          if (!firstSlot) continue;
           const rect = firstSlot.getBoundingClientRect();
           const top = rect.top - colTop + rect.height / 2;
-          html += `<span class="flabel" style="top:${top}px">${f.name}</span>`;
+          html += `<span class="flabel" style="top:${top}px">${frame.fn}</span>`;
         }
+
         labelsEl.innerHTML = html;
       }
 
+      // ─── Offset arrows ────────────────────────────────────────────────────────
       function positionOffsets(s) {
         const container = document.getElementById("offset-arrows");
         const wrapper = document.getElementById("stack-wrapper");
         if (!container || !wrapper) return;
 
         const wTop = wrapper.getBoundingClientRect().top;
-        const spVal = parseInt(s.regs.sp, 16);
+        const spVal = s.regs ? s.regs.sp : 0;
+        let html = '';
 
-        // Caller ghost slots (faded)
-        const slots = [];
-        for (let i = 0; i < GHOST_ROWS; i++) {
-          const addr = CALLER_REAL_TOP + (GHOST_ROWS - i) * 4;
-          const opacity = ((i + 1) / (GHOST_ROWS + 1)).toFixed(2);
-          if (addr !== spVal) slots.push({ id: `caller-ghost-${i}`, label: `sp+${addr - spVal}`, opacity });
-        }
-
-        // Caller real slots — offset computed from current sp
-        [
-          { id: "caller-8", addr: BASE + 8 },
-          { id: "caller-4", addr: BASE + 4 },
-          { id: "caller-0", addr: BASE },
-        ]
-          .filter((sl) => sl.addr !== spVal)
-          .forEach((sl) => slots.push({ id: sl.id, label: `sp+${sl.addr - spVal}` }));
-
-        // Baz slots — fixed sp+4, sp+8, sp+12 relative to baz's sp
-        if (s.bazReserved) {
-          slots.push(
-            { id: "baz-ra", label: "sp+12" },
-            { id: "baz-s0", label: "sp+8" },
-            { id: "baz-pad1", label: "sp+4" },
-          );
-        }
-
-        let html = "";
+        // Iterate all named slot elements and label those within ±OFFSET_MAX of sp
+        const slots = document.querySelectorAll(".frame-slot[id^='slot-']");
         for (const slot of slots) {
-          const el = document.getElementById(slot.id);
-          if (!el) continue;
-          const rect = el.getBoundingClientRect();
+          const addrHex = slot.id.slice(5); // "slot-ff0" → "ff0"
+          const addr = parseInt(addrHex, 16);
+          const offset = addr - spVal;
+          if (offset === 0) continue; // sp+0 is shown by the sp arrow itself
+          if (Math.abs(offset) > OFFSET_MAX) continue;
+          const sign = offset > 0 ? '+' : '';
+          const opacity = parseFloat(slot.style.opacity || '1');
+          const rect = slot.getBoundingClientRect();
           const top = rect.top - wTop + rect.height / 2;
-          const op = slot.opacity ?? "1";
-          html += `<div class="offset-arrow" style="top:${top}px;opacity:${op}">${slot.label}</div>`;
+          html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">sp${sign}${offset}</div>`;
         }
+
         container.innerHTML = html;
       }
+
+      // ─── Navigation ───────────────────────────────────────────────────────────
+      let cur = 0;
+      let STEPS = [];
 
       function go(dir) {
         cur = Math.max(0, Math.min(STEPS.length - 1, cur + dir));
         render(STEPS[cur]);
       }
 
-      function showTab(t) {
-        document.getElementById("tab-c").classList.toggle("active", t === "c");
-        document.getElementById("tab-asm").classList.toggle("active", t === "asm");
-        document.getElementById("view-c").classList.toggle("active", t === "c");
-        document.getElementById("view-asm").classList.toggle("active", t === "asm");
+      // ─── Program loader ───────────────────────────────────────────────────────
+      function loadProgram(prog) {
+        _firstArrowRender = true;
+        STEPS = simulate(prog);
+        cur = 0;
+        buildAsmView(prog);
+        render(STEPS[0]);
       }
 
       // ─── Init ─────────────────────────────────────────────────────────────────
       const rh = () =>
-        "0x" +
-        Math.floor(Math.random() * 0xffffffff)
-          .toString(16)
-          .toUpperCase()
-          .padStart(8, "0");
-      const RAND_REGS = {
-        sp: rh(),
-        ra: rh(),
-        a0: rh(),
-        s0: rh(),
-        a1: rh(),
-        t0: rh(),
-        t1: rh(),
-        fp: rh(),
-      };
+        "0x" + Math.floor(Math.random() * 0xffffffff).toString(16).toUpperCase().padStart(8, "0");
+      const RAND_REGS = {};
+      for (const r of ALL_REGS) RAND_REGS[r] = rh();
 
-      buildCode();
+      // Populate program selector
+      const sel = document.getElementById("prog-select");
+      PROGRAMS.forEach((p, i) => {
+        const opt = document.createElement("option");
+        opt.value = i;
+        opt.textContent = p.name;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener("change", () => loadProgram(PROGRAMS[parseInt(sel.value)]));
 
       // Build persistent stack skeleton (arrow + column + labels)
       document.getElementById("stack-area").innerHTML = `
-  <div class="stack-wrapper" id="stack-wrapper">
-    <div class="offset-arrows" id="offset-arrows"></div>
-    <div class="sp-arrow" id="sp-arrow"><span class="sp-label">sp</span><span class="sp-arrow-shaft"></span><span class="sp-arrow-head"></span></div>
-    <div class="stack-column" id="stack-column"></div>
-    <div class="frame-labels" id="frame-labels"></div>
-  </div>
-`;
+        <div class="stack-wrapper" id="stack-wrapper">
+          <div class="offset-arrows" id="offset-arrows"></div>
+          <div class="sp-arrow" id="sp-arrow"><span class="sp-label">sp</span><span class="sp-arrow-shaft"></span><span class="sp-arrow-head"></span></div>
+          <div class="stack-column" id="stack-column"></div>
+          <div class="frame-labels" id="frame-labels"></div>
+        </div>
+      `;
 
-      render(STEPS[0]);
+      loadProgram(PROGRAMS[0]);
     </script>
   </body>
 </html>
