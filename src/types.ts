@@ -20,7 +20,6 @@ export type ParsedInstr =
     | { op: "sw" | "sh" | "sb"; rs2: string; offset: number; rs1: string }
     | { op: "lw" | "lh" | "lb" | "lhu" | "lbu"; rd: string; offset: number; rs1: string }
     | { op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu"; rs1: string; rs2: string; target: string }
-    | { op: string; raw: string }
 
 export type ConcreteSpec =
     | { op: "ret" }
@@ -78,3 +77,8 @@ export interface DisplayReg {
 
 export type TokenKind = "comment" | "string" | "kw" | "fn" | "num" | "text"
 export type Token = [TokenKind, string]
+
+export class ParseError {
+    readonly kind = "ParseError" as const
+    constructor(public readonly raw: string, public readonly fn: string) {}
+}

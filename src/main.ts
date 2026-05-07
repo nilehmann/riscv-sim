@@ -1,4 +1,5 @@
 import type { Program, ParsedInstr, ConcreteSpec, ConcreteInstr, ExpandedInstr, SourceInstr, AssemblyResult, Step, DisplayReg, Token, TokenKind } from "./types"
+import { ParseError } from "./types"
 
 // ─── Programs ──────────────────────────────────────────────────────────────
 // To add a new program: append an entry to this array.
@@ -203,7 +204,7 @@ const hx = (v: number): string =>
     "0x" + (v >>> 0).toString(16).toUpperCase().padStart(4, "0");
 
 // ─── Instruction parser ───────────────────────────────────────────────────
-function parseInstr(raw: string): ParsedInstr {
+function parseInstr(raw: string): ParsedInstr | ParseError {
     const s = raw.trim().replace(/\s+/g, " ");
     const sp = s.indexOf(" ");
     const op = sp === -1 ? s : s.slice(0, sp);
@@ -283,7 +284,7 @@ function parseInstr(raw: string): ParsedInstr {
         return { op: op as "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu", rs1: args[0], rs2: args[1], target: args[2] };
     }
 
-    return { op, raw: s };
+    return new ParseError(s, "");
 }
 
 // ─── Pseudo-instruction expander ─────────────────────────────────────────
@@ -342,7 +343,7 @@ function expandPseudo(parsed: ParsedInstr): ExpandedInstr {
 }
 
 // ─── Assembler: assign addresses ──────────────────────────────────────────
-function assembleProgram(prog: Program): AssemblyResult {
+function assembleProgram(prog: Program): AssemblyResult | ParseError {
     const sourceInstrs: SourceInstr[] = [];
     const addrToSourceIdx = new Map<number, number>();
     const labels: Record<string, number> = {};
@@ -352,6 +353,8 @@ function assembleProgram(prog: Program): AssemblyResult {
         labels[fn] = addr;
         for (const line of lines) {
             const parsed = parseInstr(line);
+            if (parsed instanceof ParseError)
+                return new ParseError(parsed.raw, fn);
             const expanded = expandPseudo(parsed);
             const concreteSpecs: ConcreteSpec[] = expanded.instrs ?? [expanded as ConcreteSpec];
             const firstAddr = addr;
@@ -540,9 +543,8 @@ function highlightC(code: string): string {
 }
 
 // ─── Simulator ────────────────────────────────────────────────────────────
-function simulate(prog: Program): Step[] {
-    const { sourceInstrs, addrToSourceIdx, labels } =
-        assembleProgram(prog);
+function simulate(prog: Program, assembled: AssemblyResult): Step[] {
+    const { sourceInstrs, addrToSourceIdx, labels } = assembled;
 
     // Initialize registers (all zero, then apply initialRegs)
     const regs: Record<string, number> = {};
@@ -926,8 +928,8 @@ function fmtConcrete(c: ConcreteInstr): string {
 }
 
 // ─── Build assembly view ───────────────────────────────────────────────────
-function buildAsmView(prog: Program): void {
-    const { sourceInstrs } = assembleProgram(prog);
+function buildAsmView(assembled: AssemblyResult): void {
+    const { sourceInstrs } = assembled;
     const el = document.getElementById("view-asm")!;
     let html = "";
     let lastFn = null;
@@ -952,8 +954,8 @@ function buildAsmView(prog: Program): void {
 // ─── Render ───────────────────────────────────────────────────────────────
 let DISPLAY_REGS: DisplayReg[] = [];
 
-function computeDisplayRegs(prog: Program): DisplayReg[] {
-    const { sourceInstrs } = assembleProgram(prog);
+function computeDisplayRegs(prog: Program, assembled: AssemblyResult): DisplayReg[] {
+    const { sourceInstrs } = assembled;
     const used = new Set(["sp", "ra"]);
     for (const r of Object.keys(prog.initialRegs)) used.add(r);
     for (const si of sourceInstrs) {
@@ -1287,69 +1289,72 @@ function buildTicks(): void {
     }
 }
 
+function showConfigError(body: string): void {
+    document.getElementById("stack-area")!.innerHTML =
+        `<div style="padding:32px 24px;color:var(--red);font-family:var(--mono);font-size:15px;line-height:1.8;max-width:420px">` +
+        `<div style="font-weight:600;font-size:17px;margin-bottom:12px">Error de configuración</div>` +
+        body +
+        `</div>`;
+    document.getElementById("step-counter")!.textContent = "— / —";
+    (document.getElementById("btn-prev") as HTMLButtonElement).disabled = true;
+    (document.getElementById("btn-next") as HTMLButtonElement).disabled = true;
+}
+
 function loadProgram(prog: Program): void {
     switchTab("asm");
     const cTab = document.getElementById("tab-c") as HTMLButtonElement;
     if (prog.cCode) {
-        document.getElementById("view-c")!.innerHTML = highlightC(
-            prog.cCode,
-        );
+        document.getElementById("view-c")!.innerHTML = highlightC(prog.cCode);
         cTab.disabled = false;
     } else {
         document.getElementById("view-c")!.textContent = "";
         cTab.disabled = true;
     }
 
+    // Assemble first — catches unknown instructions before any other check
+    const assembled = assembleProgram(prog);
+    if (assembled instanceof ParseError) {
+        showConfigError(
+            `Instrucción desconocida: <code>${assembled.raw}</code> en función <code>${assembled.fn}</code>.`,
+        );
+        return;
+    }
+
     // Validate that entryPoint names a defined function
     if (!(prog.entryPoint in prog.functions)) {
-        buildAsmView(prog);
-        document.getElementById("stack-area")!.innerHTML =
-            `<div style="padding:32px 24px;color:var(--red);font-family:var(--mono);font-size:15px;line-height:1.8;max-width:420px">` +
-            `<div style="font-weight:600;font-size:17px;margin-bottom:12px">Error de configuración</div>` +
+        buildAsmView(assembled);
+        showConfigError(
             `Punto de entrada <code>${prog.entryPoint}</code> no existe en las funciones definidas.<br><br>` +
-            `<span style="color:var(--text-dim)">Funciones disponibles: ${Object.keys(
-                prog.functions,
-            )
+            `<span style="color:var(--text-dim)">Funciones disponibles: ${Object.keys(prog.functions)
                 .map((f) => `<code>${f}</code>`)
                 .join(", ")}. ` +
-            `Ajusta <code>entryPoint</code>.</span>` +
-            `</div>`;
-        document.getElementById("step-counter")!.textContent =
-            "— / —";
-        (document.getElementById("btn-prev") as HTMLButtonElement).disabled = true;
-        (document.getElementById("btn-next") as HTMLButtonElement).disabled = true;
+            `Ajusta <code>entryPoint</code>.</span>`,
+        );
         return;
     }
 
     // Validate that initial ra points outside the program's address range
-    const { sourceInstrs } = assembleProgram(prog);
+    const { sourceInstrs } = assembled;
     const progStart = prog.baseAddress;
-    const lastSi = sourceInstrs[sourceInstrs.length - 1];
-    const progEnd =
-        lastSi.concretes[lastSi.concretes.length - 1].addr + 4;
+    const lastSi = sourceInstrs[sourceInstrs.length - 1]!;
+    const progEnd = lastSi.concretes[lastSi.concretes.length - 1]!.addr + 4;
     const initRa = prog.initialRegs.ra ?? 0;
     if (initRa >= progStart && initRa < progEnd) {
-        buildAsmView(prog);
-        document.getElementById("stack-area")!.innerHTML =
-            `<div style="padding:32px 24px;color:var(--red);font-family:var(--mono);font-size:15px;line-height:1.8;max-width:420px">` +
-            `<div style="font-weight:600;font-size:17px;margin-bottom:12px">Error de configuración</div>` +
+        buildAsmView(assembled);
+        showConfigError(
             `<code>ra</code> inicial (<code>${hx(initRa)}</code>) apunta dentro del rango del programa` +
             ` [<code>${hx(progStart)}</code>–<code>${hx(progEnd - 4)}</code>].<br><br>` +
             `<span style="color:var(--text-dim)">El simulador no puede determinar cuándo termina la ejecución. ` +
-            `Ajusta <code>initialRegs.ra</code> a una dirección fuera del programa.</span>` +
-            `</div>`;
-        document.getElementById("step-counter")!.textContent =
-            "— / —";
-        (document.getElementById("btn-prev") as HTMLButtonElement).disabled = true;
-        (document.getElementById("btn-next") as HTMLButtonElement).disabled = true;
+            `Ajusta <code>initialRegs.ra</code> a una dirección fuera del programa.</span>`,
+        );
         return;
     }
 
     _firstArrowRender = true;
-    DISPLAY_REGS = computeDisplayRegs(prog);
-    STEPS = simulate(prog);
+    DISPLAY_REGS = computeDisplayRegs(prog, assembled);
+    STEPS = simulate(prog, assembled);
     cur = 0;
-    buildAsmView(prog);
+    buildAsmView(assembled);
     render(STEPS[0]!);
     buildTicks();
 }
