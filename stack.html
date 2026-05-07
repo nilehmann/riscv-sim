@@ -660,7 +660,7 @@
                     name: "bar -> foo -> baz",
                     cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
                     entryPoint: "bar",
-                    initialRegs: { sp: 0x1000, ra: 0x8050, a0: 3, s0: 0x54 },
+                    initialRegs: { sp: 0x1000, ra: 0x9000, a0: 3, s0: 0x54 },
                     baseAddress: 0x8000,
                     functions: {
                         baz: ["add     a0,a0,a1", "ret"],
@@ -832,8 +832,21 @@
                     ? argStr.split(",").map((a) => a.trim())
                     : [];
 
-                if (op === "ret") return { op: "jalr", rd: "zero", rs1: "ra", imm: 0, pseudo: "ret" };
-                if (op === "jalr") return { op, rd: args[0], rs1: args[1], imm: Number(args[2]) };
+                if (op === "ret")
+                    return {
+                        op: "jalr",
+                        rd: "zero",
+                        rs1: "ra",
+                        imm: 0,
+                        pseudo: "ret",
+                    };
+                if (op === "jalr")
+                    return {
+                        op,
+                        rd: args[0],
+                        rs1: args[1],
+                        imm: Number(args[2]),
+                    };
                 if (op === "call" || op === "j" || op === "jal")
                     return {
                         op: op === "jal" ? "call" : op,
@@ -1214,8 +1227,15 @@
 
                             if (instr.op === "addi" && instr.rd === "sp") {
                                 let top = null;
-                                for (let i = callStack.length - 1; i >= 0; i--) {
-                                    if (callStack[i].fn === instr.fn) { top = callStack[i]; break; }
+                                for (
+                                    let i = callStack.length - 1;
+                                    i >= 0;
+                                    i--
+                                ) {
+                                    if (callStack[i].fn === instr.fn) {
+                                        top = callStack[i];
+                                        break;
+                                    }
                                 }
                                 if (!top) top = callStack[callStack.length - 1];
                                 top.allocatedSize = top.entrySpBefore - val;
@@ -1355,7 +1375,7 @@
                             if (fits12) {
                                 desc = `<code>li ${instr.rd}, ${val}</code> — equivale a <code>addi ${instr.rd}, zero, ${val}</code>; <code>${instr.rd}</code> = <b>${val}</b>.`;
                             } else {
-                                const lo = val << 20 >> 20;
+                                const lo = (val << 20) >> 20;
                                 const hi = (val - lo) >> 12;
                                 desc = `<code>li ${instr.rd}, ${hx(val)}</code> — equivale a <code>lui ${instr.rd}, ${hi}</code> + <code>addi ${instr.rd}, ${instr.rd}, ${lo}</code>; <code>${instr.rd}</code> = <b>${hx(val)}</b>.`;
                             }
@@ -1447,11 +1467,12 @@
                                 hiReg = ["ra", "a0"];
                                 desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(target)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
                             } else {
-                                desc = `<code>jalr ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — `
-                                     + (instr.rd !== "zero"
-                                          ? `<code>${instr.rd}</code> = <code>${hx(linkAddr)}</code>, `
-                                          : "")
-                                     + `PC ← <code>${instr.rs1}</code> + ${instr.imm} = <code>${hx(target)}</code>.`;
+                                desc =
+                                    `<code>jalr ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — ` +
+                                    (instr.rd !== "zero"
+                                        ? `<code>${instr.rd}</code> = <code>${hx(linkAddr)}</code>, `
+                                        : "") +
+                                    `PC ← <code>${instr.rs1}</code> + ${instr.imm} = <code>${hx(target)}</code>.`;
                             }
                             break;
                         }
@@ -1852,6 +1873,30 @@
                     document.getElementById("view-c").textContent = "";
                     cTab.disabled = true;
                 }
+
+                // Validate that initial ra points outside the program's address range
+                const { instrs } = assembleProgram(prog);
+                const progStart = prog.baseAddress;
+                const progEnd = prog.baseAddress + instrs.length * 4;
+                const initRa = prog.initialRegs.ra ?? 0;
+                if (initRa >= progStart && initRa < progEnd) {
+                    buildAsmView(prog);
+                    document.getElementById("stack-area").innerHTML =
+                        `<div style="padding:32px 24px;color:var(--red);font-family:var(--mono);font-size:15px;line-height:1.8;max-width:420px">` +
+                        `<div style="font-weight:600;font-size:17px;margin-bottom:12px">Error de configuración</div>` +
+                        `<code>ra</code> inicial (<code>${hx(initRa)}</code>) apunta dentro del rango del programa` +
+                        ` [<code>${hx(progStart)}</code>–<code>${hx(progEnd - 4)}</code>].<br><br>` +
+                        `<span style="color:var(--text-dim)">El simulador no puede determinar cuándo termina la ejecución. ` +
+                        `Ajusta <code>initialRegs.ra</code> a una dirección fuera del programa.</span>` +
+                        `</div>`;
+                    document.getElementById("desc-text").textContent = "";
+                    document.getElementById("step-counter").textContent =
+                        "— / —";
+                    document.getElementById("btn-prev").disabled = true;
+                    document.getElementById("btn-next").disabled = true;
+                    return;
+                }
+
                 _firstArrowRender = true;
                 DISPLAY_REGS = computeDisplayRegs(prog);
                 STEPS = simulate(prog);
