@@ -658,7 +658,6 @@
                 },
                 {
                     name: "bar -> foo -> baz",
-                    cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
                     entryPoint: "bar",
                     initialRegs: { sp: 0x1000, ra: 0x9000, a0: 3, s0: 0x54 },
                     baseAddress: 0x8000,
@@ -672,7 +671,7 @@
                             "addi    a0,a0,1",
                             "lw      ra,12(sp)",
                             "addi    sp,sp,16",
-                            "ret     ra",
+                            "ret",
                         ],
                         bar: [
                             "addi    sp,sp,-16",
@@ -685,8 +684,17 @@
                             "lw      ra,12(sp)",
                             "lw      s0,8(sp)",
                             "addi    sp,sp,16",
-                            "ret     ra",
+                            "ret",
                         ],
+                    },
+                },
+                {
+                    name: "load big immediate",
+                    entryPoint: "foo",
+                    initialRegs: { sp: 0x1000, ra: 0x9000 },
+                    baseAddress: 0x8000,
+                    functions: {
+                        foo: ["li a0, 4097", "ret"],
                     },
                 },
                 {
@@ -2020,6 +2028,28 @@
                 } else {
                     document.getElementById("view-c").textContent = "";
                     cTab.disabled = true;
+                }
+
+                // Validate that entryPoint names a defined function
+                if (!(prog.entryPoint in prog.functions)) {
+                    buildAsmView(prog);
+                    document.getElementById("stack-area").innerHTML =
+                        `<div style="padding:32px 24px;color:var(--red);font-family:var(--mono);font-size:15px;line-height:1.8;max-width:420px">` +
+                        `<div style="font-weight:600;font-size:17px;margin-bottom:12px">Error de configuración</div>` +
+                        `Punto de entrada <code>${prog.entryPoint}</code> no existe en las funciones definidas.<br><br>` +
+                        `<span style="color:var(--text-dim)">Funciones disponibles: ${Object.keys(
+                            prog.functions,
+                        )
+                            .map((f) => `<code>${f}</code>`)
+                            .join(", ")}. ` +
+                        `Ajusta <code>entryPoint</code>.</span>` +
+                        `</div>`;
+                    document.getElementById("desc-text").textContent = "";
+                    document.getElementById("step-counter").textContent =
+                        "— / —";
+                    document.getElementById("btn-prev").disabled = true;
+                    document.getElementById("btn-next").disabled = true;
+                    return;
                 }
 
                 // Validate that initial ra points outside the program's address range
