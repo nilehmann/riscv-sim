@@ -87,6 +87,19 @@
         background: rgba(9, 105, 218, 0.07);
         border-left-color: var(--blue);
       }
+      .pc-arrow {
+        display: inline-block;
+        width: 16px;
+        text-align: center;
+        color: var(--blue);
+        font-size: 13px;
+        user-select: none;
+        flex-shrink: 0;
+        visibility: hidden;
+      }
+      .line.next-instr .pc-arrow {
+        visibility: visible;
+      }
       .line-num {
         color: var(--text-faint);
         min-width: 24px;
@@ -681,10 +694,11 @@
           };
         }
 
-        function makeStep(s, desc, hiReg, hiSlots, instrAddr) {
+        function makeStep(s, desc, hiReg, hiSlots, instrAddr, nextAddr) {
           return {
             desc,
             aHl: instrAddr != null ? [instrAddr] : [],
+            nextAddr: nextAddr ?? null,
             regs: s.regs,
             hiReg: hiReg || [],
             mem: s.mem,
@@ -703,7 +717,7 @@
         steps.push(makeStep(snap(),
           `La función <code>${prog.entryPoint}</code> es llamada con <code>a0</code> = ${regs.a0}. ` +
           `<code>sp</code> = <code>${hx(regs.sp)}</code>, <code>ra</code> = <code>${hx(regs.ra)}</code> (dirección de retorno al caller).`,
-          ['sp', 'ra', 'a0'], [], null));
+          ['sp', 'ra', 'a0'], [], null, pc));
 
         // Format a register value for use in description text
         const ADDR_REGS = new Set(['ra', 'sp', 'fp', 'gp', 'tp']);
@@ -890,7 +904,8 @@
               desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(retAddr)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
               const retSnap = snap(); // snapshot before pop so callerBase stays stable
               callStack.pop();
-              steps.push(makeStep(retSnap, desc, hiReg, hiSlots, instrAddr));
+              const retNextAddr = callStack.length === 0 ? null : pc;
+              steps.push(makeStep(retSnap, desc, hiReg, hiSlots, instrAddr, retNextAddr));
               stepPushed = true;
               break;
             }
@@ -902,7 +917,7 @@
             }
           }
 
-          if (!stepPushed) steps.push(makeStep(snap(), desc, hiReg, hiSlots, instrAddr));
+          if (!stepPushed) steps.push(makeStep(snap(), desc, hiReg, hiSlots, instrAddr, pc));
 
           // Stop if we've returned from the top-level function
           if (callStack.length === 0) break;
@@ -915,19 +930,18 @@
       function buildAsmView(prog) {
         const { instrs } = assembleProgram(prog);
         const el = document.getElementById("view-asm");
-        let lineNum = 1;
         let html = '';
         let lastFn = null;
 
         for (const instr of instrs) {
           if (instr.fn !== lastFn) {
             if (lastFn !== null) {
-              html += `<div class="line"><span class="line-num"></span><span class="asm-addr"></span><span> </span></div>`;
+              html += `<div class="line"><span class="asm-addr"></span><span> </span></div>`;
             }
-            html += `<div class="line"><span class="line-num">${lineNum++}</span><span class="asm-addr"></span><span class="lbl">${instr.fn}:</span></div>`;
+            html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${instr.fn}:</span></div>`;
             lastFn = instr.fn;
           }
-          html += `<div class="line" id="al-${instr.addr.toString(16)}"><span class="line-num">${lineNum++}</span><span class="asm-addr">${hx(instr.addr)}</span><span>  ${highlightInstr(instr.raw)}</span></div>`;
+          html += `<div class="line" id="al-${instr.addr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(instr.addr)}</span><span>  ${highlightInstr(instr.raw)}</span></div>`;
         }
 
         el.innerHTML = html;
@@ -962,6 +976,16 @@
           if (el) {
             el.classList.add('hl');
             el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        }
+
+        // Next-instruction arrow
+        document.querySelectorAll("#view-asm .line.next-instr").forEach(el => el.classList.remove('next-instr'));
+        if (s.nextAddr != null) {
+          const el = document.getElementById("al-" + s.nextAddr.toString(16));
+          if (el) {
+            el.classList.add('next-instr');
+            if ((s.aHl || []).length === 0) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
           }
         }
 
