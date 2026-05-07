@@ -80,7 +80,7 @@
         align-items: center;
         gap: 0;
         white-space: pre;
-        transition: background 0.2s;
+        transition: background 0.25s, border-color 0.25s;
         border-left: 2px solid transparent;
       }
       .line.hl {
@@ -1016,12 +1016,18 @@
 
         // Assembly highlight — keyed by instruction address
         document.querySelectorAll("#view-asm .line.hl").forEach(el => el.classList.remove('hl'));
+        clearTimeout(_hlTimeout);
         for (const addr of (s.aHl || [])) {
           const el = document.getElementById("al-" + addr.toString(16));
           if (el) {
             el.classList.add('hl');
             el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
           }
+        }
+        if ((s.aHl || []).length > 0) {
+          _hlTimeout = setTimeout(() => {
+            document.querySelectorAll("#view-asm .line.hl").forEach(el => el.classList.remove('hl'));
+          }, 400);
         }
 
         // Next-instruction arrow
@@ -1227,6 +1233,7 @@
       }
 
       // ─── Navigation ───────────────────────────────────────────────────────────
+      let _hlTimeout = null;
       let cur = 0;
       let STEPS = [];
 
