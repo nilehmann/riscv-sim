@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>RISC-V: La Pila de Llamadas</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;600&display=swap"
+            rel="stylesheet"
+        />
+        <link rel="stylesheet" href="./style.css" />
+    </head>
+    <body>
+        <div class="controls">
+            <select class="btn" id="prog-select"></select>
+            <span class="step-counter" id="step-counter">0 / 0</span>
+            <div class="progress-bar">
+                <div
+                    class="progress-fill"
+                    id="progress-fill"
+                    style="width: 0%"
+                ></div>
+                <div id="progress-thumb"></div>
+            </div>
+            <button class="btn" id="btn-prev" disabled>
+                ← Anterior
+            </button>
+            <button class="btn" id="btn-next">
+                Siguiente →
+            </button>
+        </div>
+
+        <div class="main">
+            <!-- LEFT: assembly / C -->
+            <div class="code-panel">
+                <div class="code-tabs">
+                    <button
+                        class="code-tab active"
+                        id="tab-asm"
+                    >
+                        Assembly
+                    </button>
+                    <button
+                        class="code-tab"
+                        id="tab-c"
+                    >
+                        C
+                    </button>
+                </div>
+                <div class="code-scroll scrollable" id="pane-asm">
+                    <div id="view-asm">
+                        <!-- filled by JS -->
+                    </div>
+                </div>
+                <div
+                    class="code-scroll scrollable"
+                    id="pane-c"
+                    style="display: none"
+                >
+                    <pre
+                        id="view-c"
+                        style="
+                            font-family: var(--mono);
+                            font-size: 15px;
+                            line-height: 1.7;
+                            padding: 16px;
+                            color: var(--text);
+                            white-space: pre-wrap;
+                        "
+                    ></pre>
+                </div>
+            </div>
+
+            <!-- CENTER: pila + descripción -->
+            <div class="center-panel">
+                <div class="stack-area scrollable" id="stack-area">
+                    <!-- filled by JS -->
+                </div>
+                <div class="description-box">
+                    <div class="desc-label">Qué está pasando</div>
+                    <div class="desc-text" id="desc-text">
+                        Usa el botón Siguiente para comenzar.
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: registros -->
+            <div class="reg-panel">
+                <div class="panel-title">Registros</div>
+                <div class="reg-list scrollable" id="reg-list">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+        </div>
+
+        <script type="module" src="./main.ts"></script>
+    </body>
+</html>

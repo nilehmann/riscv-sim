@@ -1,0 +1,27 @@
+{
+  "name": "asm",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nilehmann/riscv-sim.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/nilehmann/riscv-sim/issues"
+  },
+  "homepage": "https://github.com/nilehmann/riscv-sim#readme",
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.0.11",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}
