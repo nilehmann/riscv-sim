@@ -513,6 +513,33 @@
                 background: var(--border);
                 border-radius: 2px;
             }
+
+            /* ── CODE TABS ── */
+            .code-tabs {
+                display: flex;
+                border-bottom: 1px solid var(--border);
+                background: var(--surface);
+                flex-shrink: 0;
+            }
+            .code-tab {
+                font-family: var(--mono);
+                font-size: 13px;
+                padding: 7px 16px;
+                cursor: pointer;
+                border: none;
+                background: none;
+                color: var(--text-dim);
+                border-bottom: 2px solid transparent;
+                margin-bottom: -1px;
+            }
+            .code-tab.active {
+                color: var(--text);
+                border-bottom-color: var(--blue);
+            }
+            .code-tab:disabled {
+                opacity: 0.35;
+                cursor: default;
+            }
         </style>
     </head>
     <body>
@@ -536,12 +563,45 @@
         </div>
 
         <div class="main">
-            <!-- LEFT: assembly -->
+            <!-- LEFT: assembly / C -->
             <div class="code-panel">
-                <div class="code-scroll scrollable">
+                <div class="code-tabs">
+                    <button
+                        class="code-tab active"
+                        id="tab-asm"
+                        onclick="switchTab('asm')"
+                    >
+                        Assembly
+                    </button>
+                    <button
+                        class="code-tab"
+                        id="tab-c"
+                        onclick="switchTab('c')"
+                    >
+                        C
+                    </button>
+                </div>
+                <div class="code-scroll scrollable" id="pane-asm">
                     <div id="view-asm">
                         <!-- filled by JS -->
                     </div>
+                </div>
+                <div
+                    class="code-scroll scrollable"
+                    id="pane-c"
+                    style="display: none"
+                >
+                    <pre
+                        id="view-c"
+                        style="
+                            font-family: var(--mono);
+                            font-size: 15px;
+                            line-height: 1.7;
+                            padding: 16px;
+                            color: var(--text);
+                            white-space: pre-wrap;
+                        "
+                    ></pre>
                 </div>
             </div>
 
@@ -574,7 +634,8 @@
             // The first function listed determines the lowest address block.
             const PROGRAMS = [
                 {
-                    name: "baz llama a foo",
+                    name: "baz -> foo",
+                    cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
                     entryPoint: "baz",
                     initialRegs: { sp: 0x1000, ra: 0x8050, a0: 3, s0: 0x54 },
                     baseAddress: 0x8000,
@@ -596,12 +657,46 @@
                     },
                 },
                 {
+                    name: "bar -> foo -> baz",
+                    cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
+                    entryPoint: "bar",
+                    initialRegs: { sp: 0x1000, ra: 0x8050, a0: 3, s0: 0x54 },
+                    baseAddress: 0x8000,
+                    functions: {
+                        baz: ["add     a0,a0,a1", "ret"],
+                        foo: [
+                            "addi    sp,sp,-16",
+                            "sw      ra,12(sp)",
+                            "li      a1,0",
+                            "call    baz",
+                            "addi    a0,a0,1",
+                            "lw      ra,12(sp)",
+                            "addi    sp,sp,16",
+                            "ret     ra",
+                        ],
+                        bar: [
+                            "addi    sp,sp,-16",
+                            "sw      ra,12(sp)",
+                            "sw      s0,8(sp)",
+                            "mv      s0,a0",
+                            "li      a0,-1",
+                            "call    foo",
+                            "add     a0,a0,s0",
+                            "lw      ra,12(sp)",
+                            "lw      s0,8(sp)",
+                            "addi    sp,sp,16",
+                            "ret     ra",
+                        ],
+                    },
+                },
+                {
                     name: "función hoja simple",
                     entryPoint: "double",
                     initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5 },
                     baseAddress: 0x8000,
+                    cCode: `int foo(int x) {\n  return x + 1;\n}`,
                     functions: {
-                        double: ["add  a0, a0, a0", "ret"],
+                        double: ["addi  a0, a0, 1", "ret"],
                     },
                 },
             ];
@@ -737,7 +832,8 @@
                     ? argStr.split(",").map((a) => a.trim())
                     : [];
 
-                if (op === "ret") return { op };
+                if (op === "ret") return { op: "jalr", rd: "zero", rs1: "ra", imm: 0, pseudo: "ret" };
+                if (op === "jalr") return { op, rd: args[0], rs1: args[1], imm: Number(args[2]) };
                 if (op === "call" || op === "j" || op === "jal")
                     return {
                         op: op === "jal" ? "call" : op,
@@ -866,6 +962,137 @@
                 return html;
             }
 
+            // ─── C syntax highlighter ─────────────────────────────────────────────────
+            function highlightC(code) {
+                const esc = (s) =>
+                    s
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;");
+                const C_KEYWORDS = new Set([
+                    "int",
+                    "char",
+                    "float",
+                    "double",
+                    "long",
+                    "short",
+                    "unsigned",
+                    "signed",
+                    "void",
+                    "return",
+                    "if",
+                    "else",
+                    "while",
+                    "for",
+                    "do",
+                    "break",
+                    "continue",
+                    "switch",
+                    "case",
+                    "default",
+                    "struct",
+                    "union",
+                    "typedef",
+                    "static",
+                    "const",
+                    "extern",
+                    "sizeof",
+                    "enum",
+                ]);
+                const tokens = [];
+                let i = 0;
+                while (i < code.length) {
+                    // Block comment
+                    if (code[i] === "/" && code[i + 1] === "*") {
+                        const end = code.indexOf("*/", i + 2);
+                        const val =
+                            end === -1 ? code.slice(i) : code.slice(i, end + 2);
+                        tokens.push(["comment", val]);
+                        i += val.length;
+                        continue;
+                    }
+                    // Line comment
+                    if (code[i] === "/" && code[i + 1] === "/") {
+                        const end = code.indexOf("\n", i);
+                        const val =
+                            end === -1 ? code.slice(i) : code.slice(i, end);
+                        tokens.push(["comment", val]);
+                        i += val.length;
+                        continue;
+                    }
+                    // String literal
+                    if (code[i] === '"') {
+                        let j = i + 1;
+                        while (j < code.length && code[j] !== '"') {
+                            if (code[j] === "\\") j++;
+                            j++;
+                        }
+                        tokens.push(["string", code.slice(i, j + 1)]);
+                        i = j + 1;
+                        continue;
+                    }
+                    // Char literal
+                    if (code[i] === "'") {
+                        let j = i + 1;
+                        while (j < code.length && code[j] !== "'") {
+                            if (code[j] === "\\") j++;
+                            j++;
+                        }
+                        tokens.push(["string", code.slice(i, j + 1)]);
+                        i = j + 1;
+                        continue;
+                    }
+                    // Identifier / keyword / function call
+                    if (/[a-zA-Z_]/.test(code[i])) {
+                        let j = i;
+                        while (j < code.length && /\w/.test(code[j])) j++;
+                        const word = code.slice(i, j);
+                        let k = j;
+                        while (k < code.length && code[k] === " ") k++;
+                        if (code[k] === "(") tokens.push(["fn", word]);
+                        else if (C_KEYWORDS.has(word))
+                            tokens.push(["kw", word]);
+                        else tokens.push(["text", word]);
+                        i = j;
+                        continue;
+                    }
+                    // Number
+                    if (/[0-9]/.test(code[i])) {
+                        let j = i;
+                        while (
+                            j < code.length &&
+                            /[0-9a-fA-FxX.]/.test(code[j])
+                        )
+                            j++;
+                        tokens.push(["num", code.slice(i, j)]);
+                        i = j;
+                        continue;
+                    }
+                    // Everything else
+                    tokens.push(["text", code[i]]);
+                    i++;
+                }
+                return tokens
+                    .map(([type, val]) => {
+                        const e = esc(val);
+                        switch (type) {
+                            case "comment":
+                                return `<span class="cmt">${e}</span>`;
+                            case "string":
+                                return `<span class="reg">${e}</span>`;
+                            case "kw":
+                                return `<span class="kw">${e}</span>`;
+                            case "fn":
+                                return `<span class="fn">${e}</span>`;
+                            case "num":
+                                return `<span class="imm">${e}</span>`;
+                            default:
+                                return e;
+                        }
+                    })
+                    .join("");
+            }
+
             // ─── Simulator ────────────────────────────────────────────────────────────
             function simulate(prog) {
                 const { instrs, labels } = assembleProgram(prog);
@@ -986,7 +1213,11 @@
                             hiReg = [instr.rd];
 
                             if (instr.op === "addi" && instr.rd === "sp") {
-                                const top = callStack[callStack.length - 1];
+                                let top = null;
+                                for (let i = callStack.length - 1; i >= 0; i--) {
+                                    if (callStack[i].fn === instr.fn) { top = callStack[i]; break; }
+                                }
+                                if (!top) top = callStack[callStack.length - 1];
                                 top.allocatedSize = top.entrySpBefore - val;
                                 if (instr.imm < 0)
                                     desc = `<b>Prólogo</b>: <code>addi sp, sp, ${instr.imm}</code> — reserva ${-instr.imm} bytes en la pila. <code>sp</code> baja a <code>${hx(val)}</code>.`;
@@ -1184,26 +1415,26 @@
                             break;
                         }
 
-                        case "ret": {
-                            const retAddr = regs.ra;
-                            pc = retAddr;
-                            hiReg = ["ra", "a0"];
-                            desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(retAddr)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
-                            const retSnap = snap(); // snapshot before pop so callerBase stays stable
-                            callStack.pop();
-                            const retNextAddr =
-                                callStack.length === 0 ? null : pc;
-                            steps.push(
-                                makeStep(
-                                    retSnap,
-                                    desc,
-                                    hiReg,
-                                    hiSlots,
-                                    instrAddr,
-                                    retNextAddr,
-                                ),
-                            );
-                            stepPushed = true;
+                        case "jalr": {
+                            const target = (regs[instr.rs1] + instr.imm) & ~1;
+                            const linkAddr = pc + 4;
+                            if (instr.rd !== "zero") {
+                                regs[instr.rd] = linkAddr;
+                                syncFpS0(instr.rd);
+                                hiReg = [instr.rd];
+                            }
+                            pc = target;
+
+                            if (instr.pseudo === "ret") {
+                                hiReg = ["ra", "a0"];
+                                desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(target)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
+                            } else {
+                                desc = `<code>jalr ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — `
+                                     + (instr.rd !== "zero"
+                                          ? `<code>${instr.rd}</code> = <code>${hx(linkAddr)}</code>, `
+                                          : "")
+                                     + `PC ← <code>${instr.rs1}</code> + ${instr.imm} = <code>${hx(target)}</code>.`;
+                            }
                             break;
                         }
 
@@ -1225,9 +1456,6 @@
                                 pc,
                             ),
                         );
-
-                    // Stop if we've returned from the top-level function
-                    if (callStack.length === 0) break;
                 }
 
                 return steps;
@@ -1399,7 +1627,7 @@
 
                 // ── Active frames: oldest (index 0) to newest ──
                 const activeFrames = (s.callStack || []).filter(
-                    (f) => f.allocatedSize > 0,
+                    (f) => currentSp < f.entrySpBefore,
                 );
                 for (let fi = 0; fi < activeFrames.length; fi++) {
                     const frame = activeFrames[fi];
@@ -1503,8 +1731,9 @@
                 const colTop = col.getBoundingClientRect().top;
                 let html = "";
 
+                const currentSp = s.regs ? s.regs.sp : 0;
                 const activeFrames = (s.callStack || []).filter(
-                    (f) => f.allocatedSize > 0,
+                    (f) => currentSp < f.entrySpBefore,
                 );
                 for (let fi = 0; fi < activeFrames.length; fi++) {
                     const frame = activeFrames[fi];
@@ -1550,6 +1779,23 @@
                 container.innerHTML = html;
             }
 
+            // ─── Tab switcher ─────────────────────────────────────────────────────────
+            let _activeTab = "asm";
+
+            function switchTab(tab) {
+                _activeTab = tab;
+                document.getElementById("pane-asm").style.display =
+                    tab === "asm" ? "" : "none";
+                document.getElementById("pane-c").style.display =
+                    tab === "c" ? "" : "none";
+                document
+                    .getElementById("tab-asm")
+                    .classList.toggle("active", tab === "asm");
+                document
+                    .getElementById("tab-c")
+                    .classList.toggle("active", tab === "c");
+            }
+
             // ─── Navigation ───────────────────────────────────────────────────────────
             let _hlTimeout = null;
             let cur = 0;
@@ -1577,6 +1823,17 @@
             }
 
             function loadProgram(prog) {
+                switchTab("asm");
+                const cTab = document.getElementById("tab-c");
+                if (prog.cCode) {
+                    document.getElementById("view-c").innerHTML = highlightC(
+                        prog.cCode,
+                    );
+                    cTab.disabled = false;
+                } else {
+                    document.getElementById("view-c").textContent = "";
+                    cTab.disabled = true;
+                }
                 _firstArrowRender = true;
                 DISPLAY_REGS = computeDisplayRegs(prog);
                 STEPS = simulate(prog);
