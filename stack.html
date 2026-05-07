@@ -886,10 +886,11 @@
             case 'ret': {
               const retAddr = regs.ra;
               pc = retAddr;
-              callStack.pop();
               hiReg = ['ra', 'a0'];
               desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(retAddr)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
-              steps.push(makeStep(snap(), desc, hiReg, hiSlots, instrAddr));
+              const retSnap = snap(); // snapshot before pop so callerBase stays stable
+              callStack.pop();
+              steps.push(makeStep(retSnap, desc, hiReg, hiSlots, instrAddr));
               stepPushed = true;
               break;
             }
