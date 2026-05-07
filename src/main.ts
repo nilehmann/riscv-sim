@@ -607,14 +607,12 @@ function simulate(prog) {
 
     function makeStep(
         s,
-        desc,
         hiReg,
         hiSlots,
         instrAddr,
         nextAddr,
     ) {
         return {
-            desc,
             aHl: instrAddr != null ? [instrAddr] : [],
             nextAddr: nextAddr ?? null,
             regs: s.regs,
@@ -633,21 +631,8 @@ function simulate(prog) {
 
     // Emit initial step (state before first instruction)
     steps.push(
-        makeStep(
-            snap(),
-            `La función <code>${prog.entryPoint}</code> es llamada con <code>a0</code> = ${regs.a0}. ` +
-                `<code>sp</code> = <code>${hx(regs.sp)}</code>, <code>ra</code> = <code>${hx(regs.ra)}</code> (dirección de retorno al caller).`,
-            ["sp", "ra", "a0"],
-            [],
-            null,
-            pc,
-        ),
+        makeStep(snap(), ["sp", "ra", "a0"], [], null, pc),
     );
-
-    // Format a register value for use in description text
-    const ADDR_REGS = new Set(["ra", "sp", "fp", "gp", "tp"]);
-    const fmtVal = (name, val) =>
-        ADDR_REGS.has(name) ? hx(val) : String(val);
 
     const MAX_STEPS = 500;
 
@@ -658,8 +643,7 @@ function simulate(prog) {
 
         const prev = { ...regs };
         const instrAddr = si.firstAddr;
-        let desc = "",
-            hiReg = [],
+        let hiReg = [],
             hiSlots = [];
 
         switch (si.parsed.op) {
@@ -694,12 +678,6 @@ function simulate(prog) {
                     }
                     if (!top) top = callStack[callStack.length - 1];
                     top.allocatedSize = top.entrySpBefore - val;
-                    if (c.imm < 0)
-                        desc = `<b>Prólogo</b>: <code>addi sp, sp, ${c.imm}</code> — reserva ${-c.imm} bytes en la pila. <code>sp</code> baja a <code>${hx(val)}</code>.`;
-                    else
-                        desc = `<b>Epílogo</b>: <code>addi sp, sp, +${c.imm}</code> — libera ${c.imm} bytes. <code>sp</code> sube a <code>${hx(val)}</code>.`;
-                } else {
-                    desc = `<code>${si.parsed.op} ${c.rd}, ${c.rs1}, ${c.imm}</code> — <code>${c.rd}</code> = ${prev[c.rs1]} ${si.parsed.op === "addi" ? "+" : ""} ${c.imm} = <b>${val}</b>.`;
                 }
                 break;
             }
@@ -711,13 +689,11 @@ function simulate(prog) {
                 syncFpS0(c.rd);
                 pc += 4;
                 hiReg = [c.rd];
-                desc = `<code>mv ${si.parsed.rd}, ${si.parsed.rs1}</code> — <code>${si.parsed.rd}</code> ← <code>${si.parsed.rs1}</code> = <b>${val}</b>.`;
                 break;
             }
 
             case "nop": {
                 pc += 4;
-                desc = `<code>nop</code> — no operation.`;
                 break;
             }
 
@@ -727,7 +703,6 @@ function simulate(prog) {
                 syncFpS0(si.parsed.rd);
                 pc += 4;
                 hiReg = [si.parsed.rd];
-                desc = `<code>neg ${si.parsed.rd}, ${si.parsed.rs1}</code> — <code>${si.parsed.rd}</code> = -${prev[si.parsed.rs1]} = <b>${val}</b>.`;
                 break;
             }
 
@@ -745,7 +720,6 @@ function simulate(prog) {
                 syncFpS0(c.rd);
                 pc += 4;
                 hiReg = [c.rd];
-                desc = `<code>${si.parsed.op} ${c.rd}, ${c.rs1}, ${c.imm}</code> — <code>${c.rd}</code> = ${prev[c.rs1]} shift ${c.imm} = <b>${val}</b>.`;
                 break;
             }
 
@@ -775,19 +749,6 @@ function simulate(prog) {
                     srl: (a, b) => a >>> b,
                     sra: (a, b) => a >> b,
                 };
-                const syms = {
-                    add: "+",
-                    sub: "-",
-                    mul: "×",
-                    div: "÷",
-                    rem: "%",
-                    and: "&",
-                    or: "|",
-                    xor: "^",
-                    sll: "<<",
-                    srl: ">>>",
-                    sra: ">>",
-                };
                 const val = ops[si.parsed.op](
                     regs[c.rs1],
                     regs[c.rs2],
@@ -796,7 +757,6 @@ function simulate(prog) {
                 syncFpS0(c.rd);
                 pc += 4;
                 hiReg = [c.rd];
-                desc = `<code>${si.parsed.op} ${c.rd}, ${c.rs1}, ${c.rs2}</code> — <code>${c.rd}</code> = ${prev[c.rs1]} ${syms[si.parsed.op]} ${prev[c.rs2]} = <b>${val}</b>.`;
                 break;
             }
 
@@ -809,7 +769,6 @@ function simulate(prog) {
                 slotLabels.set(addr, c.rs2);
                 pc += 4;
                 hiSlots = [addr];
-                desc = `<code>${si.parsed.op} ${c.rs2}, ${c.offset}(${c.rs1})</code> — guarda <code>${c.rs2}</code> = ${fmtVal(c.rs2, regs[c.rs2])} en dirección <code>${hx(addr)}</code>.`;
                 break;
             }
 
@@ -826,7 +785,6 @@ function simulate(prog) {
                 pc += 4;
                 hiReg = [c.rd];
                 hiSlots = [addr];
-                desc = `<code>${si.parsed.op} ${c.rd}, ${c.offset}(${c.rs1})</code> — restaura <code>${c.rd}</code> = <b>${fmtVal(c.rd, val)}</b> desde dirección <code>${hx(addr)}</code>.`;
                 break;
             }
 
@@ -842,7 +800,6 @@ function simulate(prog) {
                     pc += 4;
                 }
                 hiReg = [si.parsed.rd];
-                desc = `<code>li ${si.parsed.rd}, ${si.parsed.imm}</code> — <code>${si.parsed.rd}</code> = <b>${regs[si.parsed.rd]}</b>.`;
                 break;
             }
 
@@ -853,7 +810,6 @@ function simulate(prog) {
                 syncFpS0(c.rd);
                 pc += 4;
                 hiReg = [c.rd];
-                desc = `<code>lui ${c.rd}, ${c.imm}</code> — <code>${c.rd}</code> = ${c.imm} << 12 = <b>${hx(val)}</b>.`;
                 break;
             }
 
@@ -861,7 +817,6 @@ function simulate(prog) {
                 const target = labels[si.parsed.target];
                 if (target == null) {
                     pc += 4;
-                    desc = `<code>call ${si.parsed.target}</code> — etiqueta no encontrada.`;
                     break;
                 }
                 regs.ra = pc + 4;
@@ -873,7 +828,6 @@ function simulate(prog) {
                     entrySpBefore: regs.sp,
                     allocatedSize: 0,
                 });
-                desc = `<code>call ${si.parsed.target}</code> — guarda dirección de retorno en <code>ra</code> = <code>${hx(regs.ra)}</code> y salta a <code>${si.parsed.target}</code>.`;
                 break;
             }
 
@@ -881,11 +835,9 @@ function simulate(prog) {
                 const target = labels[si.parsed.target];
                 if (target == null) {
                     pc += 4;
-                    desc = `<code>j ${si.parsed.target}</code> — etiqueta no encontrada.`;
                     break;
                 }
                 pc = target;
-                desc = `<code>j ${si.parsed.target}</code> — salta incondicionalmente a <code>${hx(target)}</code>.`;
                 break;
             }
 
@@ -894,7 +846,6 @@ function simulate(prog) {
                 const target = labels[c.target];
                 if (target == null) {
                     pc += 4;
-                    desc = `<code>jal ${c.rd}, ${c.target}</code> — etiqueta no encontrada.`;
                     break;
                 }
                 if (c.rd !== "zero") {
@@ -903,12 +854,6 @@ function simulate(prog) {
                     hiReg = [c.rd];
                 }
                 pc = target;
-                desc =
-                    `<code>jal ${c.rd}, ${c.target}</code> — ` +
-                    (c.rd !== "zero"
-                        ? `<code>${c.rd}</code> = <code>${hx(regs[c.rd])}</code>, `
-                        : "") +
-                    `PC ← <code>${hx(target)}</code>.`;
                 break;
             }
 
@@ -916,7 +861,6 @@ function simulate(prog) {
                 const target = regs.ra & ~1;
                 pc = target;
                 hiReg = ["ra", "a0"];
-                desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(target)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
                 break;
             }
 
@@ -930,12 +874,6 @@ function simulate(prog) {
                     hiReg = [c.rd];
                 }
                 pc = target;
-                desc =
-                    `<code>jalr ${c.rd}, ${c.rs1}, ${c.imm}</code> — ` +
-                    (c.rd !== "zero"
-                        ? `<code>${c.rd}</code> = <code>${hx(linkAddr)}</code>, `
-                        : "") +
-                    `PC ← <code>${c.rs1}</code> + ${c.imm} = <code>${hx(target)}</code>.`;
                 break;
             }
 
@@ -960,19 +898,17 @@ function simulate(prog) {
                 );
                 const target = labels[c.target];
                 pc = taken && target != null ? target : pc + 4;
-                desc = `<code>${si.parsed.op} ${c.rs1}, ${c.rs2}, ${c.target}</code> — ${regs[c.rs1]} vs ${regs[c.rs2]}: rama ${taken ? "<b>tomada</b>" : "no tomada"}.`;
                 break;
             }
 
             default: {
                 pc += 4;
-                desc = `<code>${si.raw}</code>`;
                 break;
             }
         }
 
         steps.push(
-            makeStep(snap(), desc, hiReg, hiSlots, instrAddr, pc),
+            makeStep(snap(), hiReg, hiSlots, instrAddr, pc),
         );
     }
 
@@ -1073,9 +1009,6 @@ function fmtRegVal(key, val) {
 }
 
 function render(s) {
-    // Description
-    document.getElementById("desc-text").innerHTML = s.desc;
-
     // Assembly highlight — keyed by instruction address
     document
         .querySelectorAll("#view-asm .line.hl")
@@ -1414,7 +1347,6 @@ function loadProgram(prog) {
                 .join(", ")}. ` +
             `Ajusta <code>entryPoint</code>.</span>` +
             `</div>`;
-        document.getElementById("desc-text").textContent = "";
         document.getElementById("step-counter").textContent =
             "— / —";
         document.getElementById("btn-prev").disabled = true;
@@ -1439,7 +1371,6 @@ function loadProgram(prog) {
             `<span style="color:var(--text-dim)">El simulador no puede determinar cuándo termina la ejecución. ` +
             `Ajusta <code>initialRegs.ra</code> a una dirección fuera del programa.</span>` +
             `</div>`;
-        document.getElementById("desc-text").textContent = "";
         document.getElementById("step-counter").textContent =
             "— / —";
         document.getElementById("btn-prev").disabled = true;

@@ -136,40 +136,6 @@ body {
     overflow: hidden;
 }
 
-.description-box {
-    padding: 16px 20px;
-    border-top: 1px solid var(--border);
-    background: var(--surface);
-    min-height: 80px;
-    flex-shrink: 0;
-}
-.desc-label {
-    font-family: var(--mono);
-    font-size: 14px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-faint);
-    margin-bottom: 6px;
-}
-.desc-text {
-    font-size: 18px;
-    color: var(--text);
-    line-height: 1.6;
-}
-.desc-text code {
-    font-family: var(--mono);
-    font-size: 16px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    padding: 1px 5px;
-    border-radius: 4px;
-    color: var(--green);
-}
-.desc-text b {
-    color: var(--orange);
-    font-weight: 600;
-}
-
 /* stack visualization */
 .stack-area {
     flex: 1;
