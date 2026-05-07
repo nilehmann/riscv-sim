@@ -1013,6 +1013,7 @@
                             parsed,
                             concretes,
                             firstAddr,
+                            isPseudo: expanded.instrs != null,
                         });
                     }
                 }
@@ -1600,6 +1601,48 @@
                 return steps;
             }
 
+            // ─── Concrete instruction serializer ──────────────────────────────────────
+            function fmtConcrete(c) {
+                if (c.op === "jalr") return `jalr ${c.rd}, ${c.rs1}, ${c.imm}`;
+                if (c.op === "jal") return `jal ${c.rd}, ${c.target}`;
+                if (c.op === "lui") return `lui ${c.rd}, ${c.imm}`;
+                if (
+                    [
+                        "addi",
+                        "andi",
+                        "ori",
+                        "xori",
+                        "slli",
+                        "srli",
+                        "srai",
+                    ].includes(c.op)
+                )
+                    return `${c.op} ${c.rd}, ${c.rs1}, ${c.imm}`;
+                if (
+                    [
+                        "add",
+                        "sub",
+                        "mul",
+                        "div",
+                        "rem",
+                        "and",
+                        "or",
+                        "xor",
+                        "sll",
+                        "srl",
+                        "sra",
+                    ].includes(c.op)
+                )
+                    return `${c.op} ${c.rd}, ${c.rs1}, ${c.rs2}`;
+                if (["sw", "sb", "sh"].includes(c.op))
+                    return `${c.op} ${c.rs2}, ${c.offset}(${c.rs1})`;
+                if (["lw", "lb", "lh", "lbu", "lhu"].includes(c.op))
+                    return `${c.op} ${c.rd}, ${c.offset}(${c.rs1})`;
+                if (["beq", "bne", "blt", "bge", "bltu", "bgeu"].includes(c.op))
+                    return `${c.op} ${c.rs1}, ${c.rs2}, ${c.target}`;
+                return c.op;
+            }
+
             // ─── Build assembly view ───────────────────────────────────────────────────
             function buildAsmView(prog) {
                 const { sourceInstrs } = assembleProgram(prog);
@@ -1615,7 +1658,10 @@
                         html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.fn}:</span></div>`;
                         lastFn = si.fn;
                     }
-                    html += `<div class="line" id="al-${si.firstAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span></div>`;
+                    const tip = si.isPseudo
+                        ? ` data-tooltip="${si.concretes.map(fmtConcrete).join("&#10;")}"`
+                        : "";
+                    html += `<div class="line" id="al-${si.firstAddr.toString(16)}"${tip}><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span></div>`;
                 }
 
                 el.innerHTML = html;
