@@ -1,0 +1,1125 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RISC-V: La Pila de Llamadas</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #ffffff;
+        --surface: #f6f8fa;
+        --surface2: #eaeef2;
+        --border: #d0d7de;
+        --text: #1f2328;
+        --text-dim: #656d76;
+        --text-faint: #9198a1;
+        --green: #1a7f37;
+        --green-dim: rgba(26, 127, 55, 0.1);
+        --blue: #0969da;
+        --blue-dim: rgba(9, 105, 218, 0.1);
+        --orange: #9a6700;
+        --orange-dim: rgba(154, 103, 0, 0.12);
+        --red: #cf222e;
+        --red-dim: rgba(207, 34, 46, 0.1);
+        --purple: #8250df;
+        --purple-dim: rgba(130, 80, 223, 0.1);
+        --mono: "IBM Plex Mono", monospace;
+        --sans: "IBM Plex Sans", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── MAIN GRID ── */
+      .main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 360px 1fr 220px;
+        grid-template-rows: 1fr;
+        gap: 0;
+        overflow: hidden;
+        min-height: 0;
+      }
+
+      /* ── CODE PANEL ── */
+      .code-panel {
+        border-right: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .tab-bar {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .tab {
+        font-family: var(--mono);
+        font-size: 16px;
+        padding: 10px 18px;
+        cursor: pointer;
+        color: var(--text-dim);
+        border-bottom: 2px solid transparent;
+        transition: color 0.15s;
+        user-select: none;
+      }
+      .tab:hover {
+        color: var(--text);
+      }
+      .tab.active {
+        color: var(--text);
+        border-bottom-color: var(--blue);
+      }
+
+      .code-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 0;
+      }
+      .code-view {
+        display: none;
+      }
+      .code-view.active {
+        display: block;
+      }
+
+      .line {
+        font-family: var(--mono);
+        font-size: 17px;
+        line-height: 1.8;
+        padding: 0 16px;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        white-space: pre;
+        transition: background 0.2s;
+        border-left: 2px solid transparent;
+      }
+      .line.hl {
+        background: rgba(9, 105, 218, 0.07);
+        border-left-color: var(--blue);
+      }
+      .line-num {
+        color: var(--text-faint);
+        min-width: 24px;
+        text-align: right;
+        margin-right: 16px;
+        user-select: none;
+        font-size: 15px;
+      }
+      .asm-addr {
+        color: var(--text-faint);
+        font-size: 14px;
+        min-width: 72px;
+        margin-right: 6px;
+        user-select: none;
+      }
+
+      /* syntax colors */
+      .kw {
+        color: var(--red);
+      }
+      .reg {
+        color: var(--green);
+      }
+      .imm {
+        color: var(--orange);
+      }
+      .lbl {
+        color: var(--blue);
+        font-weight: 600;
+      }
+      .fn {
+        color: var(--purple);
+      }
+      .cmt {
+        color: var(--text-faint);
+        font-style: italic;
+      }
+      .str {
+        color: var(--orange);
+      }
+
+      /* ── STACK + DESCRIPTION CENTER PANEL ── */
+      .center-panel {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .description-box {
+        padding: 16px 20px;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        min-height: 80px;
+        flex-shrink: 0;
+        display: none;
+      }
+      .desc-label {
+        font-family: var(--mono);
+        font-size: 14px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        margin-bottom: 6px;
+      }
+      .desc-text {
+        font-size: 18px;
+        color: var(--text);
+        line-height: 1.6;
+      }
+      .desc-text code {
+        font-family: var(--mono);
+        font-size: 16px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        padding: 1px 5px;
+        border-radius: 4px;
+        color: var(--green);
+      }
+      .desc-text b {
+        color: var(--orange);
+        font-weight: 600;
+      }
+
+      /* stack visualization */
+      .stack-area {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px 24px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: center;
+        gap: 0;
+      }
+
+      .addr-row {
+        font-family: var(--mono);
+        font-size: 14px;
+        color: var(--text-faint);
+        text-align: center;
+        padding: 4px 0 2px;
+        letter-spacing: 0.05em;
+      }
+
+      .frame {
+        overflow: hidden;
+      }
+      .frame.hidden {
+        display: none;
+      }
+
+      .frame-slot {
+        border-top: 1px solid var(--border);
+        padding: 8px 16px;
+        font-family: var(--mono);
+        font-size: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: background 0.25s;
+        background: var(--surface);
+      }
+      .frame.caller .frame-slot {
+        background: rgba(100, 110, 120, 0.08);
+      }
+      .frame.baz.reserved .frame-slot {
+        background: var(--blue-dim);
+      }
+      .frame.baz:not(.reserved) .frame-slot,
+      .frame.free .frame-slot {
+        background: var(--bg);
+        border-top-style: dashed;
+      }
+      .frame.baz:not(.reserved) .slot-name,
+      .frame.baz:not(.reserved) .slot-val,
+      .frame.free .slot-name,
+      .frame.free .slot-val {
+        color: var(--text-faint);
+      }
+      .frame.foo .frame-slot {
+        background: var(--green-dim);
+      }
+      .frame.baz.reserved .slot-name {
+        color: var(--blue);
+      }
+      .frame.foo .slot-name {
+        color: var(--green);
+      }
+      .frame-slot.hi {
+        background: var(--orange-dim) !important;
+      }
+      .frame-ellipsis {
+        border-top: 1px solid var(--border);
+        padding: 5px 16px;
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--text-faint);
+        text-align: center;
+        letter-spacing: 0.15em;
+      }
+      .frame.caller .frame-ellipsis {
+        border-top: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .frame.free .frame-ellipsis {
+        border-bottom: none;
+      }
+      .frame-slot.empty {
+        color: var(--text-faint);
+      }
+      .slot-name {
+        color: var(--text-dim);
+      }
+      .slot-val {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .stack-wrapper {
+        display: flex;
+        align-items: flex-start;
+        position: relative;
+        gap: 12px;
+      }
+      .offset-arrows {
+        position: absolute;
+        right: 100%;
+        top: 0;
+        height: 100%;
+        pointer-events: none;
+      }
+      .offset-arrow {
+        position: absolute;
+        right: 0;
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--text-faint);
+        white-space: nowrap;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding-right: 8px;
+      }
+      .stack-column {
+        border-left: 1px solid var(--border);
+        border-right: 1px solid var(--border);
+        margin-top: 20px;
+        overflow: hidden;
+        flex: 0 0 auto;
+        min-width: 320px;
+      }
+      .sp-arrow {
+        position: absolute;
+        right: 100%;
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--green);
+        white-space: nowrap;
+        pointer-events: none;
+        transform: translateY(-50%);
+        transition: top 0.45s ease;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding-right: 8px;
+      }
+      .sp-label {
+        margin-right: 6px;
+      }
+      .sp-arrow-shaft {
+        display: inline-block;
+        width: 20px;
+        height: 2px;
+        background: currentColor;
+      }
+      .sp-arrow-head {
+        display: inline-block;
+        width: 0;
+        height: 0;
+        border-top: 6px solid transparent;
+        border-bottom: 6px solid transparent;
+        border-left: 9px solid currentColor;
+      }
+      .frame-labels {
+        position: absolute;
+        left: calc(100% + 12px);
+        top: 0;
+      }
+      .flabel {
+        position: absolute;
+        left: 0;
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--text-dim);
+        transform: translateY(-50%);
+        white-space: nowrap;
+        pointer-events: none;
+      }
+
+      /* ── REGISTERS PANEL ── */
+      .reg-panel {
+        border-left: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .panel-title {
+        font-family: var(--mono);
+        font-size: 14px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        padding: 9px 12px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+      .reg-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 0;
+      }
+      .reg-row {
+        display: flex;
+        flex-direction: column;
+        padding: 8px 16px;
+        gap: 1px;
+        border-left: 2px solid transparent;
+        transition:
+          background 0.2s,
+          border-color 0.2s;
+      }
+      .reg-row.hi {
+        background: var(--orange-dim);
+        border-left-color: var(--orange);
+      }
+      .reg-name {
+        font-family: var(--mono);
+        font-size: 17px;
+        color: var(--green);
+        font-weight: 600;
+      }
+      .reg-val {
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--text);
+      }
+      .reg-desc {
+        font-size: 14px;
+        color: var(--text-faint);
+      }
+
+      /* ── CONTROLS ── */
+      .controls {
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        padding: 6px 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .step-counter {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--text-faint);
+        min-width: 70px;
+      }
+      .progress-bar {
+        flex: 1;
+        height: 3px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+      }
+      .progress-fill {
+        height: 100%;
+        background: var(--blue);
+        border-radius: 2px;
+        transition: width 0.3s ease;
+      }
+
+      .btn {
+        font-family: var(--mono);
+        font-size: 13px;
+        padding: 6px 16px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        color: var(--text);
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s;
+        white-space: nowrap;
+      }
+      .btn:hover:not(:disabled) {
+        background: var(--surface);
+        border-color: var(--text-dim);
+      }
+      .btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+      }
+      .btn.primary {
+        background: var(--blue);
+        border-color: var(--blue);
+        color: #fff;
+        font-weight: 600;
+      }
+      .btn.primary:hover:not(:disabled) {
+        background: #0860ca;
+      }
+
+      .scrollable::-webkit-scrollbar {
+        width: 4px;
+      }
+      .scrollable::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .scrollable::-webkit-scrollbar-thumb {
+        background: var(--border);
+        border-radius: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="controls">
+      <span class="step-counter" id="step-counter">0 / 0</span>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+      </div>
+      <button class="btn" id="btn-prev" onclick="go(-1)" disabled>← Anterior</button>
+      <button class="btn" id="btn-next" onclick="go(1)">Siguiente →</button>
+    </div>
+
+    <div class="main">
+      <!-- LEFT: código -->
+      <div class="code-panel">
+        <div class="tab-bar">
+          <div class="tab active" id="tab-c" onclick="showTab('c')">C</div>
+          <div class="tab" id="tab-asm" onclick="showTab('asm')">Assembly</div>
+        </div>
+        <div class="code-scroll scrollable">
+          <div class="code-view active" id="view-c">
+            <!-- filled by JS -->
+          </div>
+          <div class="code-view" id="view-asm">
+            <!-- filled by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- CENTER: pila + descripción -->
+      <div class="center-panel">
+        <div class="stack-area scrollable" id="stack-area">
+          <!-- filled by JS -->
+        </div>
+        <div class="description-box">
+          <div class="desc-label">Qué está pasando</div>
+          <div class="desc-text" id="desc-text">Usa el botón Siguiente para comenzar.</div>
+        </div>
+      </div>
+
+      <!-- RIGHT: registros -->
+      <div class="reg-panel">
+        <div class="panel-title">Registros</div>
+        <div class="reg-list scrollable" id="reg-list">
+          <!-- filled by JS -->
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ─── Código fuente C ───────────────────────────────────────────────────────
+      const C_LINES = [
+        { id: "c0", html: '<span class="kw">int</span> foo(<span class="kw">int</span> x) {' },
+        { id: "c1", html: '  <span class="kw">return</span> x + <span class="imm">1</span>;' },
+        { id: "c2", html: "}" },
+        { id: "c3", html: "" },
+        { id: "c4", html: '<span class="kw">int</span> baz(<span class="kw">int</span> y) {' },
+        {
+          id: "c5",
+          html: '  <span class="kw">return</span> <span class="fn">foo</span>(<span class="imm">1</span>) + y;',
+        },
+        { id: "c6", html: "}" },
+      ];
+
+      // ─── Assembly RISC-V ───────────────────────────────────────────────────────
+      const ASM_LINES = [
+        { id: "a_flbl", html: '<span class="lbl">foo:</span>' },
+        {
+          id: "a0",
+          addr: "0x8000",
+          html: '  <span class="kw">addi</span> <span class="reg">a0</span>, <span class="reg">a0</span>, <span class="imm">1</span>',
+        },
+        { id: "a1", addr: "0x8004", html: '  <span class="kw">ret</span>' },
+        { id: "a2", html: "" },
+        { id: "a_blbl", html: '<span class="lbl">baz:</span>' },
+        {
+          id: "a3",
+          addr: "0x8010",
+          html: '  <span class="kw">addi</span> <span class="reg">sp</span>, <span class="reg">sp</span>, <span class="imm">-16</span>',
+        },
+        {
+          id: "a4",
+          addr: "0x8014",
+          html: '  <span class="kw">sw</span>   <span class="reg">ra</span>, <span class="imm">12</span>(<span class="reg">sp</span>)',
+        },
+        {
+          id: "a5",
+          addr: "0x8018",
+          html: '  <span class="kw">sw</span>   <span class="reg">s0</span>, <span class="imm">8</span>(<span class="reg">sp</span>)',
+        },
+        {
+          id: "a6",
+          addr: "0x801C",
+          html: '  <span class="kw">mv</span>   <span class="reg">s0</span>, <span class="reg">a0</span>',
+        },
+        {
+          id: "a7",
+          addr: "0x8020",
+          html: '  <span class="kw">li</span>   <span class="reg">a0</span>, <span class="imm">1</span>',
+        },
+        {
+          id: "a8",
+          addr: "0x8024",
+          html: '  <span class="kw">call</span> <span class="fn">foo</span>',
+        },
+        {
+          id: "a9",
+          addr: "0x8028",
+          html: '  <span class="kw">add</span>  <span class="reg">a0</span>, <span class="reg">a0</span>, <span class="reg">s0</span>',
+        },
+        {
+          id: "a10",
+          addr: "0x802C",
+          html: '  <span class="kw">lw</span>   <span class="reg">ra</span>, <span class="imm">12</span>(<span class="reg">sp</span>)',
+        },
+        {
+          id: "a11",
+          addr: "0x8030",
+          html: '  <span class="kw">lw</span>   <span class="reg">s0</span>, <span class="imm">8</span>(<span class="reg">sp</span>)',
+        },
+        {
+          id: "a12",
+          addr: "0x8034",
+          html: '  <span class="kw">addi</span> <span class="reg">sp</span>, <span class="reg">sp</span>, <span class="imm">16</span>',
+        },
+        { id: "a13", addr: "0x8038", html: '  <span class="kw">ret</span>' },
+      ];
+
+      // ─── Pasos ─────────────────────────────────────────────────────────────────
+      const BASE = 0x1000;
+      const BAZ_SP = BASE - 16; // 0xFF0
+      const PREV_S0 = "0x0002";
+      const GHOST_ROWS = 3;
+      const CALLER_REAL_TOP = BASE + 4; // address of the topmost real caller slot
+
+      const h = (v) => "0x" + v.toString(16).toUpperCase().padStart(4, "0");
+
+      // Cada paso define: descripción, líneas resaltadas (c y asm), registros, estado de la pila
+      const STEPS = [
+        // 0 ── Estado inicial
+        {
+          desc: "Un <b>caller desconocido</b> llama a <code>baz(3)</code>. El argumento y=3 está en <code>a0</code>. <code>sp</code> apunta al tope del frame del caller y <code>ra</code> = <code>0x8050</code> contiene la dirección de retorno al caller.",
+          cHl: [],
+          aHl: [],
+          regs: { sp: h(BASE), ra: "0x8050", a0: "3", s0: PREV_S0 },
+          hiReg: ["sp", "ra", "a0"],
+          caller: true,
+          bazReserved: false,
+          bazRa: "—",
+          bazS0: "—",
+          hiSlots: [],
+          spAt: "caller",
+        },
+        // 1 ── baz: addi sp, sp, -16
+        {
+          desc: "<b>Prólogo de baz</b>: <code>addi sp, sp, -16</code> — el stack pointer baja 16 bytes para reservar espacio para el frame de baz. La pila crece hacia abajo.",
+          cHl: ["c4"],
+          aHl: ["a3"],
+          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: PREV_S0 },
+          hiReg: ["sp"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "—",
+          bazS0: "—",
+          hiSlots: [],
+          spAt: "baz",
+        },
+        // 2 ── baz: sw ra, 12(sp)
+        {
+          desc: "<b>Prólogo de baz</b>: <code>sw ra, 12(sp)</code> — guarda <code>ra</code> (0x8050) en <code>sp+12</code> (dirección 0xFFC). Esto es <b>obligatorio</b> porque <code>call foo</code> sobreescribirá <code>ra</code>.",
+          cHl: ["c4"],
+          aHl: ["a4"],
+          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: PREV_S0 },
+          hiReg: ["ra"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: "—",
+          hiSlots: ["baz-ra"],
+          spAt: "baz",
+        },
+        // 3 ── baz: sw s0, 8(sp)
+        {
+          desc: "<b>Prólogo de baz</b>: <code>sw s0, 8(sp)</code> — guarda <code>s0</code> en <code>sp+8</code> (dirección 0xFF8). En RISC-V, <code>s0–s11</code> son <b>callee-saved</b>: baz planea usar <code>s0</code> para guardar <code>y</code>, así que primero debe preservar su valor anterior.",
+          cHl: ["c4"],
+          aHl: ["a5"],
+          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: PREV_S0 },
+          hiReg: ["s0"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: ["baz-s0"],
+          spAt: "baz",
+        },
+        // 4 ── baz: mv s0, a0
+        {
+          desc: "<b>baz guarda y en s0</b>: <code>mv s0, a0</code> — copia el argumento y=3 desde <code>a0</code> a <code>s0</code>. Como <code>call foo</code> usará <code>a0</code> para pasar el argumento a foo y recibirá el resultado, baz necesita guardar <code>y</code> en un registro que sobreviva la llamada. <code>s0</code> es callee-saved, así que foo está obligado a preservarlo.",
+          cHl: ["c5"],
+          aHl: ["a6"],
+          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "3", s0: "3" },
+          hiReg: ["s0"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: [],
+          spAt: "baz",
+        },
+        // 5 ── baz: li a0, 1
+        {
+          desc: "<b>baz prepara el argumento</b>: <code>li a0, 1</code> — carga el entero 1 en <code>a0</code>. En RISC-V, el primer argumento se pasa por <code>a0</code>.",
+          cHl: ["c5"],
+          aHl: ["a7"],
+          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "1", s0: "3" },
+          hiReg: ["a0"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: [],
+          spAt: "baz",
+        },
+        // 6 ── baz: call foo
+        {
+          desc: "<b>baz llama a foo</b>: <code>call foo</code> escribe la dirección de retorno a baz en <code>ra</code> (0x8028) y salta a <code>foo</code>. El <code>ra</code> anterior (0x8050) está a salvo en la pila. <b>foo es una función hoja</b>: no llama a nadie más, así que no necesita guardar <code>ra</code> ni reservar frame.",
+          cHl: ["c5"],
+          aHl: ["a8"],
+          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "1", s0: "3" },
+          hiReg: ["ra"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: [],
+          spAt: "baz",
+        },
+        // 7 ── foo: addi a0, a0, 1
+        {
+          desc: "<b>Cuerpo de foo</b>: <code>addi a0, a0, 1</code> — calcula x+1 = 1+1 = 2 y lo deja en <code>a0</code>. Nótese que <b>sp no cambió</b>: foo no tiene frame propio. El puntero de pila permanece en 0xFF0.",
+          cHl: ["c1"],
+          aHl: ["a0"],
+          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "2", s0: "3" },
+          hiReg: ["a0"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: [],
+          spAt: "baz",
+        },
+        // 8 ── foo: ret
+        {
+          desc: "<b>foo retorna</b>: <code>ret</code> salta a <code>ra</code> (0x8028). El control vuelve a baz justo después de <code>call foo</code>. El resultado 2 está en <code>a0</code>. Como foo no modificó <code>sp</code>, no hay epílogo — simplemente retorna.",
+          cHl: ["c5"],
+          aHl: ["a1"],
+          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "2", s0: "3" },
+          hiReg: ["a0"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: [],
+          spAt: "baz",
+        },
+        // 9 ── baz: add a0, a0, s0
+        {
+          desc: "<b>baz combina los resultados</b>: <code>add a0, a0, s0</code> — suma el valor de retorno de foo (2) con <code>s0</code> (que guardaba y=3). <code>a0</code> = 2 + 3 = <b>5</b>. Este será el valor de retorno de baz.",
+          cHl: ["c5"],
+          aHl: ["a9"],
+          regs: { sp: h(BAZ_SP), ra: "0x8028", a0: "5", s0: "3" },
+          hiReg: ["a0"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: [],
+          spAt: "baz",
+        },
+        // 10 ── baz: lw ra, 12(sp)
+        {
+          desc: "<b>Epílogo de baz</b>: <code>lw ra, 12(sp)</code> restaura <code>ra</code> = <code>0x8050</code> desde la pila. <code>s0</code> todavía no se ha restaurado.",
+          cHl: ["c6"],
+          aHl: ["a10"],
+          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "5", s0: "3" },
+          hiReg: ["ra"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: ["baz-ra"],
+          spAt: "baz",
+        },
+        // 11 ── baz: lw s0, 8(sp)
+        {
+          desc: "<b>Epílogo de baz</b>: <code>lw s0, 8(sp)</code> restaura el valor original de <code>s0</code> = <code>0x0002</code>. Los registros callee-saved quedan exactamente igual que antes de entrar a baz.",
+          cHl: ["c6"],
+          aHl: ["a11"],
+          regs: { sp: h(BAZ_SP), ra: "0x8050", a0: "5", s0: PREV_S0 },
+          hiReg: ["s0"],
+          caller: true,
+          bazReserved: true,
+          bazRa: "0x8050",
+          bazS0: PREV_S0,
+          hiSlots: ["baz-s0"],
+          spAt: "baz",
+        },
+        // 12 ── baz: addi sp, sp, 16
+        {
+          desc: "<b>Epílogo de baz</b>: <code>addi sp, sp, 16</code> libera el frame — <code>sp</code> sube de vuelta a <code>0x1000</code>. El frame de baz desaparece de la pila.",
+          cHl: ["c6"],
+          aHl: ["a12"],
+          regs: { sp: h(BASE), ra: "0x8050", a0: "5", s0: PREV_S0 },
+          hiReg: ["sp"],
+          caller: true,
+          bazReserved: false,
+          bazRa: "—",
+          bazS0: "—",
+          hiSlots: [],
+          spAt: "caller",
+        },
+        // 13 ── baz: ret
+        {
+          desc: "<b>baz retorna</b>: <code>ret</code> salta a <code>ra</code> (0x8050), volviendo al caller. La pila quedó <b>exactamente igual</b> que antes de llamar a baz. El resultado final 5 está en <code>a0</code>.",
+          cHl: ["c6"],
+          aHl: ["a13"],
+          regs: { sp: h(BASE), ra: "0x8050", a0: "5", s0: PREV_S0 },
+          hiReg: ["ra", "a0"],
+          caller: true,
+          bazReserved: false,
+          bazRa: "—",
+          bazS0: "—",
+          hiSlots: [],
+          spAt: "caller",
+        },
+      ];
+
+      // ─── Estado ────────────────────────────────────────────────────────────────
+      let cur = 0;
+
+      // ─── Renderizar código ────────────────────────────────────────────────────
+      function buildCode() {
+        const cEl = document.getElementById("view-c");
+        const aEl = document.getElementById("view-asm");
+
+        cEl.innerHTML = C_LINES.map(
+          (l, i) =>
+            `<div class="line" id="cl-${l.id}"><span class="line-num">${i + 1}</span><span>${l.html || " "}</span></div>`,
+        ).join("");
+
+        aEl.innerHTML = ASM_LINES.map(
+          (l, i) =>
+            `<div class="line" id="al-${l.id}"><span class="line-num">${i + 1}</span><span class="asm-addr">${l.addr || ""}</span><span>${l.html || " "}</span></div>`,
+        ).join("");
+      }
+
+      // ─── Renderizar paso ──────────────────────────────────────────────────────
+      function render(s) {
+        // Descripción
+        document.getElementById("desc-text").innerHTML = s.desc;
+
+        // Resaltado código C
+        C_LINES.forEach((l) => {
+          const el = document.getElementById("cl-" + l.id);
+          if (el) el.classList.toggle("hl", s.cHl.includes(l.id));
+        });
+
+        // Resaltado assembly
+        ASM_LINES.forEach((l) => {
+          const el = document.getElementById("al-" + l.id);
+          if (el) el.classList.toggle("hl", s.aHl.includes(l.id));
+        });
+
+        // Scroll auto al primer renglón resaltado
+        const firstCHl = s.cHl[0] ? document.getElementById("cl-" + s.cHl[0]) : null;
+        if (firstCHl && document.getElementById("view-c").classList.contains("active")) {
+          firstCHl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+        const firstAHl = s.aHl[0] ? document.getElementById("al-" + s.aHl[0]) : null;
+        if (firstAHl && document.getElementById("view-asm").classList.contains("active")) {
+          firstAHl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+
+        // Registros
+        const REGS = [
+          { name: "sp", desc: "stack pointer", key: "sp" },
+          { name: "ra", desc: "dirección retorno", key: "ra" },
+          { name: "a0", desc: "arg / retorno", key: "a0" },
+          { name: "s0", desc: "callee-saved", key: "s0" },
+          { name: "a1", desc: "arg 2", key: "a1" },
+          { name: "t0", desc: "temporal", key: "t0" },
+          { name: "t1", desc: "temporal", key: "t1" },
+          { name: "fp", desc: "frame pointer", key: "fp" },
+        ];
+        const hiR = new Set(s.hiReg || []);
+        document.getElementById("reg-list").innerHTML = REGS.map((r) => {
+          const val = s.regs[r.key] ?? RAND_REGS[r.key];
+          return `<div class="reg-row${hiR.has(r.name) ? " hi" : ""}">
+      <span class="reg-name">${r.name}</span>
+      <span class="reg-val">${val}</span>
+      <span class="reg-desc">${r.desc}</span>
+    </div>`;
+        }).join("");
+
+        // Pila
+        buildStack(s);
+        requestAnimationFrame(() => {
+          positionSpArrow(s);
+          positionLabels(s);
+          positionOffsets(s);
+        });
+
+        // Controles
+        document.getElementById("step-counter").textContent = `${cur + 1} / ${STEPS.length}`;
+        document.getElementById("progress-fill").style.width =
+          ((cur + 1) / STEPS.length) * 100 + "%";
+        document.getElementById("btn-prev").disabled = cur === 0;
+        document.getElementById("btn-next").disabled = cur === STEPS.length - 1;
+      }
+
+      function buildStack(s) {
+        const hiS = new Set(s.hiSlots || []);
+        const col = document.getElementById("stack-column");
+
+        let html = "";
+
+        // Frame caller — elipsis + 4 slots con direcciones reales
+        let callerGhosts = "";
+        for (let i = 0; i < GHOST_ROWS; i++) {
+          const addr = CALLER_REAL_TOP + (GHOST_ROWS - i) * 4;
+          const opacity = ((i + 1) / (GHOST_ROWS + 1)).toFixed(2);
+          callerGhosts += `<div class="frame-slot" id="caller-ghost-${i}" style="opacity:${opacity}"><span class="slot-name">${h(addr)}</span><span class="slot-val">—</span></div>`;
+        }
+
+        html += `<div class="frame caller${s.caller ? "" : " hidden"}" id="fr-caller">
+    <div class="frame-ellipsis"><div>dirección alta</div><div>↑</div></div>
+    ${callerGhosts}
+    <div class="frame-slot" id="caller-4">
+      <span class="slot-name">${h(BASE + 4)}</span>
+      <span class="slot-val" style="color:var(--text-faint)">—</span>
+    </div>
+    <div class="frame-slot" id="caller-0">
+      <span class="slot-name">${h(BASE)}</span>
+      <span class="slot-val" style="color:var(--text-faint)">—</span>
+    </div>
+  </div>`;
+
+        // Frame baz — 4 slots, high-to-low in DOM
+        // 0xFFC ra (sp+12), 0xFF8 s0 (sp+8), 0xFF4 unused (sp+4), 0xFF0 unused (sp+0 = sp)
+        const bazRaLabel = s.bazReserved ? `${h(BAZ_SP + 12)} &nbsp;ra` : h(BAZ_SP + 12);
+        const bazS0Label = s.bazReserved ? `${h(BAZ_SP + 8)} &nbsp;s0` : h(BAZ_SP + 8);
+        html += `<div class="frame baz${s.bazReserved ? " reserved" : ""}" id="fr-baz">
+    <div class="frame-slot${hiS.has("baz-ra") ? " hi" : ""}" id="baz-ra">
+      <span class="slot-name">${bazRaLabel}</span>
+      <span class="slot-val">${s.bazReserved ? s.bazRa : "—"}</span>
+    </div>
+    <div class="frame-slot${hiS.has("baz-s0") ? " hi" : ""}" id="baz-s0">
+      <span class="slot-name">${bazS0Label}</span>
+      <span class="slot-val">${s.bazReserved ? s.bazS0 : "—"}</span>
+    </div>
+    <div class="frame-slot" id="baz-pad1">
+      <span class="slot-name">${h(BAZ_SP + 4)}</span>
+      <span class="slot-val">—</span>
+    </div>
+    <div class="frame-slot" id="baz-pad0">
+      <span class="slot-name">${h(BAZ_SP)}</span>
+      <span class="slot-val">—</span>
+    </div>
+  </div>`;
+
+        // Free zone — unallocated memory below baz's frame
+        html += `<div class="frame free" id="fr-free">
+    ${(() => { let g = ""; for (let i = 0; i < GHOST_ROWS; i++) { const addr = BAZ_SP - 12 - (i + 1) * 4; const opacity = ((GHOST_ROWS - i) / (GHOST_ROWS + 1)).toFixed(2); g += `<div class="frame-slot" style="opacity:${opacity}"><span class="slot-name">${h(addr)}</span><span class="slot-val">—</span></div>`; } return g; })()}
+    <div class="frame-ellipsis"><div>↓</div><div>dirección baja</div></div>
+  </div>`;
+
+        col.innerHTML = html;
+      }
+
+      let _firstArrowRender = true;
+
+      function positionSpArrow(s) {
+        const arrow = document.getElementById("sp-arrow");
+        const wrapper = document.getElementById("stack-wrapper");
+        const frameId = { caller: "fr-caller", baz: "fr-baz", foo: "fr-foo" }[s.spAt];
+        const frame = document.getElementById(frameId);
+        if (!arrow || !wrapper || !frame) return;
+
+        const slots = frame.querySelectorAll(".frame-slot");
+        const hdr = slots[slots.length - 1] || frame;
+        const wRect = wrapper.getBoundingClientRect();
+        const hRect = hdr.getBoundingClientRect();
+        const top = hRect.top - wRect.top + hRect.height / 2;
+
+        if (_firstArrowRender) {
+          arrow.style.transition = "none";
+          arrow.style.top = top + "px";
+          arrow.getBoundingClientRect(); // force reflow
+          arrow.style.transition = "";
+          _firstArrowRender = false;
+        } else {
+          arrow.style.top = top + "px";
+        }
+      }
+
+      function positionLabels(s) {
+        const col = document.getElementById("stack-column");
+        const labelsEl = document.getElementById("frame-labels");
+        if (!col || !labelsEl) return;
+
+        const colTop = col.getBoundingClientRect().top;
+        const frames = [
+          { id: "fr-caller", name: "", show: s.caller },
+          { id: "fr-baz", name: "baz(int y)", show: s.bazReserved },
+        ];
+
+        let html = "";
+        for (const f of frames) {
+          if (!f.show) continue;
+          const el = document.getElementById(f.id);
+          if (!el) continue;
+          const firstSlot = el.querySelector(".frame-slot") || el;
+          const rect = firstSlot.getBoundingClientRect();
+          const top = rect.top - colTop + rect.height / 2;
+          html += `<span class="flabel" style="top:${top}px">${f.name}</span>`;
+        }
+        labelsEl.innerHTML = html;
+      }
+
+      function positionOffsets(s) {
+        const container = document.getElementById("offset-arrows");
+        const wrapper = document.getElementById("stack-wrapper");
+        if (!container || !wrapper) return;
+
+        const wTop = wrapper.getBoundingClientRect().top;
+        const spVal = parseInt(s.regs.sp, 16);
+
+        // Caller ghost slots (faded)
+        const slots = [];
+        for (let i = 0; i < GHOST_ROWS; i++) {
+          const addr = CALLER_REAL_TOP + (GHOST_ROWS - i) * 4;
+          const opacity = ((i + 1) / (GHOST_ROWS + 1)).toFixed(2);
+          if (addr !== spVal) slots.push({ id: `caller-ghost-${i}`, label: `sp+${addr - spVal}`, opacity });
+        }
+
+        // Caller real slots — offset computed from current sp
+        [
+          { id: "caller-8", addr: BASE + 8 },
+          { id: "caller-4", addr: BASE + 4 },
+          { id: "caller-0", addr: BASE },
+        ]
+          .filter((sl) => sl.addr !== spVal)
+          .forEach((sl) => slots.push({ id: sl.id, label: `sp+${sl.addr - spVal}` }));
+
+        // Baz slots — fixed sp+4, sp+8, sp+12 relative to baz's sp
+        if (s.bazReserved) {
+          slots.push(
+            { id: "baz-ra", label: "sp+12" },
+            { id: "baz-s0", label: "sp+8" },
+            { id: "baz-pad1", label: "sp+4" },
+          );
+        }
+
+        let html = "";
+        for (const slot of slots) {
+          const el = document.getElementById(slot.id);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          const top = rect.top - wTop + rect.height / 2;
+          const op = slot.opacity ?? "1";
+          html += `<div class="offset-arrow" style="top:${top}px;opacity:${op}">${slot.label}</div>`;
+        }
+        container.innerHTML = html;
+      }
+
+      function go(dir) {
+        cur = Math.max(0, Math.min(STEPS.length - 1, cur + dir));
+        render(STEPS[cur]);
+      }
+
+      function showTab(t) {
+        document.getElementById("tab-c").classList.toggle("active", t === "c");
+        document.getElementById("tab-asm").classList.toggle("active", t === "asm");
+        document.getElementById("view-c").classList.toggle("active", t === "c");
+        document.getElementById("view-asm").classList.toggle("active", t === "asm");
+      }
+
+      // ─── Init ─────────────────────────────────────────────────────────────────
+      const rh = () =>
+        "0x" +
+        Math.floor(Math.random() * 0xffffffff)
+          .toString(16)
+          .toUpperCase()
+          .padStart(8, "0");
+      const RAND_REGS = {
+        sp: rh(),
+        ra: rh(),
+        a0: rh(),
+        s0: rh(),
+        a1: rh(),
+        t0: rh(),
+        t1: rh(),
+        fp: rh(),
+      };
+
+      buildCode();
+
+      // Build persistent stack skeleton (arrow + column + labels)
+      document.getElementById("stack-area").innerHTML = `
+  <div class="stack-wrapper" id="stack-wrapper">
+    <div class="offset-arrows" id="offset-arrows"></div>
+    <div class="sp-arrow" id="sp-arrow"><span class="sp-label">sp</span><span class="sp-arrow-shaft"></span><span class="sp-arrow-head"></span></div>
+    <div class="stack-column" id="stack-column"></div>
+    <div class="frame-labels" id="frame-labels"></div>
+  </div>
+`;
+
+      render(STEPS[0]);
+    </script>
+  </body>
+</html>
