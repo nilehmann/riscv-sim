@@ -1,8 +1,10 @@
+import type { Program, ParsedInstr, ConcreteSpec, ConcreteInstr, ExpandedInstr, SourceInstr, AssemblyResult, Step, DisplayReg, Token, TokenKind } from "./types"
+
 // ─── Programs ──────────────────────────────────────────────────────────────
 // To add a new program: append an entry to this array.
 // functions: object mapping name → array of instruction strings (in order).
 // The first function listed determines the lowest address block.
-const PROGRAMS = [
+const PROGRAMS: Program[] = [
     {
         name: "baz -> foo",
         cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
@@ -197,11 +199,11 @@ const GHOST_ROWS = 3;
 const OFFSET_MAX = 64; // only show sp±N labels within this range
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
-const hx = (v) =>
+const hx = (v: number): string =>
     "0x" + (v >>> 0).toString(16).toUpperCase().padStart(4, "0");
 
 // ─── Instruction parser ───────────────────────────────────────────────────
-function parseInstr(raw) {
+function parseInstr(raw: string): ParsedInstr {
     const s = raw.trim().replace(/\s+/g, " ");
     const sp = s.indexOf(" ");
     const op = sp === -1 ? s : s.slice(0, sp);
@@ -213,7 +215,7 @@ function parseInstr(raw) {
     if (op === "ret") return { op: "ret" };
     if (op === "jalr")
         return {
-            op,
+            op: "jalr",
             rd: args[0],
             rs1: args[1],
             imm: Number(args[2]),
@@ -228,9 +230,9 @@ function parseInstr(raw) {
         };
     if (op === "li" || op === "lui")
         return { op, rd: args[0], imm: Number(args[1]) };
-    if (op === "mv") return { op, rd: args[0], rs1: args[1] };
-    if (op === "neg") return { op, rd: args[0], rs1: args[1] };
-    if (op === "nop") return { op };
+    if (op === "mv") return { op: "mv", rd: args[0], rs1: args[1] };
+    if (op === "neg") return { op: "neg", rd: args[0], rs1: args[1] };
+    if (op === "nop") return { op: "nop" };
     if (
         op === "addi" ||
         op === "slli" ||
@@ -248,28 +250,14 @@ function parseInstr(raw) {
         };
     }
     if (
-        [
-            "add",
-            "sub",
-            "mul",
-            "div",
-            "rem",
-            "and",
-            "or",
-            "xor",
-            "sll",
-            "srl",
-            "sra",
-        ].includes(op)
+        (["add", "sub", "mul", "div", "rem", "and", "or", "xor", "sll", "srl", "sra"] as string[]).includes(op)
     ) {
-        return { op, rd: args[0], rs1: args[1], rs2: args[2] };
+        return { op: op as "add" | "sub" | "mul" | "div" | "rem" | "and" | "or" | "xor" | "sll" | "srl" | "sra", rd: args[0], rs1: args[1], rs2: args[2] };
     }
 
     // sw/lw/sb/lb/sh/lh: reg, offset(base)
     if (
-        ["sw", "lw", "sb", "lb", "sh", "lh", "lbu", "lhu"].includes(
-            op,
-        )
+        (["sw", "lw", "sb", "lb", "sh", "lh", "lbu", "lhu"] as string[]).includes(op)
     ) {
         const mem = args[1] && args[1].match(/^(-?\d+)\((\w+)\)$/);
         if (mem) {
@@ -282,7 +270,7 @@ function parseInstr(raw) {
                 };
             }
             return {
-                op,
+                op: op as "lw" | "lh" | "lb" | "lhu" | "lbu",
                 rd: args[0],
                 offset: Number(mem[1]),
                 rs1: mem[2],
@@ -291,17 +279,16 @@ function parseInstr(raw) {
     }
 
     // Branches: rs1, rs2, label
-    if (["beq", "bne", "blt", "bge", "bltu", "bgeu"].includes(op)) {
-        return { op, rs1: args[0], rs2: args[1], target: args[2] };
+    if ((["beq", "bne", "blt", "bge", "bltu", "bgeu"] as string[]).includes(op)) {
+        return { op: op as "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu", rs1: args[0], rs2: args[1], target: args[2] };
     }
 
     return { op, raw: s };
 }
 
 // ─── Pseudo-instruction expander ─────────────────────────────────────────
-function expandPseudo(parsed) {
-    const { op, rd, rs1, imm } = parsed;
-    switch (op) {
+function expandPseudo(parsed: ParsedInstr): ExpandedInstr {
+    switch (parsed.op) {
         case "ret":
             return {
                 ...parsed,
@@ -309,11 +296,10 @@ function expandPseudo(parsed) {
                     { op: "jalr", rd: "zero", rs1: "ra", imm: 0 },
                 ],
             };
-        case "mv":
-            return {
-                ...parsed,
-                instrs: [{ op: "addi", rd, rs1, imm: 0 }],
-            };
+        case "mv": {
+            const p = parsed as Extract<ParsedInstr, { op: "mv" | "neg" }>;
+            return { ...parsed, instrs: [{ op: "addi", rd: p.rd, rs1: p.rs1, imm: 0 }] };
+        }
         case "nop":
             return {
                 ...parsed,
@@ -321,30 +307,20 @@ function expandPseudo(parsed) {
                     { op: "addi", rd: "zero", rs1: "zero", imm: 0 },
                 ],
             };
-        case "neg":
-            return {
-                ...parsed,
-                instrs: [{ op: "sub", rd, rs1: "zero", rs2: rs1 }],
-            };
-        case "call":
-            return {
-                ...parsed,
-                instrs: [
-                    { op: "jal", rd: "ra", target: parsed.target },
-                ],
-            };
-        case "j":
-            return {
-                ...parsed,
-                instrs: [
-                    {
-                        op: "jal",
-                        rd: "zero",
-                        target: parsed.target,
-                    },
-                ],
-            };
+        case "neg": {
+            const p = parsed as Extract<ParsedInstr, { op: "mv" | "neg" }>;
+            return { ...parsed, instrs: [{ op: "sub", rd: p.rd, rs1: "zero", rs2: p.rs1 }] };
+        }
+        case "call": {
+            const p = parsed as Extract<ParsedInstr, { op: "call" | "j" }>;
+            return { ...parsed, instrs: [{ op: "jal", rd: "ra", target: p.target }] };
+        }
+        case "j": {
+            const p = parsed as Extract<ParsedInstr, { op: "call" | "j" }>;
+            return { ...parsed, instrs: [{ op: "jal", rd: "zero", target: p.target }] };
+        }
         case "li": {
+            const { rd, imm } = parsed as Extract<ParsedInstr, { op: "li" | "lui" }>;
             if (imm >= -2048 && imm <= 2047)
                 return {
                     ...parsed,
@@ -366,10 +342,10 @@ function expandPseudo(parsed) {
 }
 
 // ─── Assembler: assign addresses ──────────────────────────────────────────
-function assembleProgram(prog) {
-    const sourceInstrs = [];
-    const addrToSourceIdx = new Map();
-    const labels = {};
+function assembleProgram(prog: Program): AssemblyResult {
+    const sourceInstrs: SourceInstr[] = [];
+    const addrToSourceIdx = new Map<number, number>();
+    const labels: Record<string, number> = {};
     let addr = prog.baseAddress;
 
     for (const [fn, lines] of Object.entries(prog.functions)) {
@@ -377,12 +353,12 @@ function assembleProgram(prog) {
         for (const line of lines) {
             const parsed = parseInstr(line);
             const expanded = expandPseudo(parsed);
-            const concreteSpecs = expanded.instrs ?? [expanded];
+            const concreteSpecs: ConcreteSpec[] = expanded.instrs ?? [expanded as ConcreteSpec];
             const firstAddr = addr;
-            const concretes = [];
+            const concretes: ConcreteInstr[] = [];
             for (const spec of concreteSpecs) {
                 addrToSourceIdx.set(addr, sourceInstrs.length);
-                concretes.push({ fn, addr, ...spec });
+                concretes.push({ fn, addr, ...spec } as ConcreteInstr);
                 addr += 4;
             }
             sourceInstrs.push({
@@ -399,7 +375,7 @@ function assembleProgram(prog) {
 }
 
 // ─── Syntax highlighter ───────────────────────────────────────────────────
-function highlightInstr(raw) {
+function highlightInstr(raw: string): string {
     const s = raw.trim();
     const sp = s.indexOf(" ");
     const op = sp === -1 ? s : s.slice(0, sp);
@@ -408,7 +384,7 @@ function highlightInstr(raw) {
     let html = `<span class="kw">${op}</span>`;
     if (!rest) return html;
 
-    const tokenHtml = (tok) => {
+    const tokenHtml = (tok: string): string => {
         const t = tok.trim();
         const memM = t.match(/^(-?\d+)\((\w+)\)$/);
         if (memM)
@@ -433,8 +409,8 @@ function highlightInstr(raw) {
 }
 
 // ─── C syntax highlighter ─────────────────────────────────────────────────
-function highlightC(code) {
-    const esc = (s) =>
+function highlightC(code: string): string {
+    const esc = (s: string): string =>
         s
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
@@ -469,7 +445,7 @@ function highlightC(code) {
         "sizeof",
         "enum",
     ]);
-    const tokens = [];
+    const tokens: Token[] = [];
     let i = 0;
     while (i < code.length) {
         // Block comment
@@ -519,10 +495,10 @@ function highlightC(code) {
             const word = code.slice(i, j);
             let k = j;
             while (k < code.length && code[k] === " ") k++;
-            if (code[k] === "(") tokens.push(["fn", word]);
+            if (code[k] === "(") tokens.push(["fn" as TokenKind, word]);
             else if (C_KEYWORDS.has(word))
-                tokens.push(["kw", word]);
-            else tokens.push(["text", word]);
+                tokens.push(["kw" as TokenKind, word]);
+            else tokens.push(["text" as TokenKind, word]);
             i = j;
             continue;
         }
@@ -543,7 +519,7 @@ function highlightC(code) {
         i++;
     }
     return tokens
-        .map(([type, val]) => {
+        .map(([type, val]: Token) => {
             const e = esc(val);
             switch (type) {
                 case "comment":
@@ -564,12 +540,12 @@ function highlightC(code) {
 }
 
 // ─── Simulator ────────────────────────────────────────────────────────────
-function simulate(prog) {
+function simulate(prog: Program): Step[] {
     const { sourceInstrs, addrToSourceIdx, labels } =
         assembleProgram(prog);
 
     // Initialize registers (all zero, then apply initialRegs)
-    const regs = {};
+    const regs: Record<string, number> = {};
     for (const r of ALL_REGS) regs[r] = 0;
     regs.zero = 0;
     for (const [k, v] of Object.entries(prog.initialRegs))
@@ -593,7 +569,7 @@ function simulate(prog) {
         },
     ];
 
-    const steps = [];
+    const steps: Step[] = [];
 
     function snap() {
         return {
@@ -606,12 +582,12 @@ function simulate(prog) {
     }
 
     function makeStep(
-        s,
-        hiReg,
-        hiSlots,
-        instrAddr,
-        nextAddr,
-    ) {
+        s: ReturnType<typeof snap>,
+        hiReg: string[],
+        hiSlots: number[],
+        instrAddr: number | null,
+        nextAddr: number | null,
+    ): Step {
         return {
             aHl: instrAddr != null ? [instrAddr] : [],
             nextAddr: nextAddr ?? null,
@@ -624,7 +600,7 @@ function simulate(prog) {
         };
     }
 
-    function syncFpS0(rd) {
+    function syncFpS0(rd: string): void {
         if (rd === "s0") regs.fp = regs.s0;
         if (rd === "fp") regs.s0 = regs.fp;
     }
@@ -643,16 +619,16 @@ function simulate(prog) {
 
         const prev = { ...regs };
         const instrAddr = si.firstAddr;
-        let hiReg = [],
-            hiSlots = [];
+        let hiReg: string[] = [],
+            hiSlots: number[] = [];
 
         switch (si.parsed.op) {
             case "addi":
             case "andi":
             case "ori":
             case "xori": {
-                const c = si.concretes[0];
-                const ops = {
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; rs1: string; imm: number };
+                const ops: Record<string, (a: number, b: number) => number> = {
                     addi: (a, b) => a + b,
                     andi: (a, b) => a & b,
                     ori: (a, b) => a | b,
@@ -683,7 +659,7 @@ function simulate(prog) {
             }
 
             case "mv": {
-                const c = si.concretes[0];
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; rs1: string };
                 const val = regs[c.rs1];
                 regs[c.rd] = val;
                 syncFpS0(c.rd);
@@ -698,19 +674,20 @@ function simulate(prog) {
             }
 
             case "neg": {
-                const val = -prev[si.parsed.rs1];
-                regs[si.parsed.rd] = val;
-                syncFpS0(si.parsed.rd);
+                const pn = si.parsed as Extract<ParsedInstr, { op: "mv" | "neg" }>;
+                const val = -prev[pn.rs1]!;
+                regs[pn.rd] = val;
+                syncFpS0(pn.rd);
                 pc += 4;
-                hiReg = [si.parsed.rd];
+                hiReg = [pn.rd];
                 break;
             }
 
             case "slli":
             case "srli":
             case "srai": {
-                const c = si.concretes[0];
-                const ops = {
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; rs1: string; imm: number };
+                const ops: Record<string, (a: number, b: number) => number> = {
                     slli: (a, b) => a << b,
                     srli: (a, b) => a >>> b,
                     srai: (a, b) => a >> b,
@@ -734,8 +711,8 @@ function simulate(prog) {
             case "sll":
             case "srl":
             case "sra": {
-                const c = si.concretes[0];
-                const ops = {
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; rs1: string; rs2: string };
+                const ops: Record<string, (a: number, b: number) => number> = {
                     add: (a, b) => a + b,
                     sub: (a, b) => a - b,
                     mul: (a, b) => a * b,
@@ -763,7 +740,7 @@ function simulate(prog) {
             case "sw":
             case "sb":
             case "sh": {
-                const c = si.concretes[0];
+                const c = si.concretes[0] as ConcreteInstr & { rs2: string; offset: number; rs1: string };
                 const addr = regs[c.rs1] + c.offset;
                 mem.set(addr, regs[c.rs2]);
                 slotLabels.set(addr, c.rs2);
@@ -777,7 +754,7 @@ function simulate(prog) {
             case "lh":
             case "lbu":
             case "lhu": {
-                const c = si.concretes[0];
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; offset: number; rs1: string };
                 const addr = regs[c.rs1] + c.offset;
                 const val = mem.get(addr) ?? 0;
                 regs[c.rd] = val;
@@ -794,17 +771,18 @@ function simulate(prog) {
                         regs[c.rd] = c.imm << 12;
                         syncFpS0(c.rd);
                     } else {
-                        regs[c.rd] = regs[c.rs1] + c.imm;
-                        syncFpS0(c.rd);
+                        const ca = c as ConcreteInstr & { rd: string; rs1: string; imm: number };
+                        regs[ca.rd] = regs[ca.rs1] + ca.imm;
+                        syncFpS0(ca.rd);
                     }
                     pc += 4;
                 }
-                hiReg = [si.parsed.rd];
+                hiReg = [(si.parsed as Extract<ParsedInstr, { op: "li" | "lui" }>).rd];
                 break;
             }
 
             case "lui": {
-                const c = si.concretes[0];
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; imm: number };
                 const val = c.imm << 12;
                 regs[c.rd] = val;
                 syncFpS0(c.rd);
@@ -814,7 +792,8 @@ function simulate(prog) {
             }
 
             case "call": {
-                const target = labels[si.parsed.target];
+                const pc_call = si.parsed as Extract<ParsedInstr, { op: "call" | "j" }>;
+                const target = labels[pc_call.target];
                 if (target == null) {
                     pc += 4;
                     break;
@@ -824,7 +803,7 @@ function simulate(prog) {
                 hiReg = ["ra"];
                 pc = target;
                 callStack.push({
-                    fn: si.parsed.target,
+                    fn: pc_call.target,
                     entrySpBefore: regs.sp,
                     allocatedSize: 0,
                 });
@@ -832,17 +811,18 @@ function simulate(prog) {
             }
 
             case "j": {
-                const target = labels[si.parsed.target];
-                if (target == null) {
+                const pj = si.parsed as Extract<ParsedInstr, { op: "call" | "j" }>;
+                const targetJ = labels[pj.target];
+                if (targetJ == null) {
                     pc += 4;
                     break;
                 }
-                pc = target;
+                pc = targetJ;
                 break;
             }
 
             case "jal": {
-                const c = si.concretes[0];
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; target: string };
                 const target = labels[c.target];
                 if (target == null) {
                     pc += 4;
@@ -865,7 +845,7 @@ function simulate(prog) {
             }
 
             case "jalr": {
-                const c = si.concretes[0];
+                const c = si.concretes[0] as ConcreteInstr & { rd: string; rs1: string; imm: number };
                 const target = (regs[c.rs1] + c.imm) & ~1;
                 const linkAddr = pc + 4;
                 if (c.rd !== "zero") {
@@ -883,14 +863,14 @@ function simulate(prog) {
             case "bge":
             case "bltu":
             case "bgeu": {
-                const c = si.concretes[0];
-                const conds = {
+                const c = si.concretes[0] as ConcreteInstr & { rs1: string; rs2: string; target: string };
+                const conds: Record<string, (a: number, b: number) => boolean> = {
                     beq: (a, b) => a === b,
                     bne: (a, b) => a !== b,
                     blt: (a, b) => a < b,
                     bge: (a, b) => a >= b,
-                    bltu: (a, b) => a >>> 0 < b >>> 0,
-                    bgeu: (a, b) => a >>> 0 >= b >>> 0,
+                    bltu: (a, b) => (a >>> 0) < (b >>> 0),
+                    bgeu: (a, b) => (a >>> 0) >= (b >>> 0),
                 };
                 const taken = conds[si.parsed.op](
                     regs[c.rs1],
@@ -916,51 +896,39 @@ function simulate(prog) {
 }
 
 // ─── Concrete instruction serializer ──────────────────────────────────────
-function fmtConcrete(c) {
+function fmtConcrete(c: ConcreteInstr): string {
     if (c.op === "jalr") return `jalr ${c.rd}, ${c.rs1}, ${c.imm}`;
     if (c.op === "jal") return `jal ${c.rd}, ${c.target}`;
-    if (c.op === "lui") return `lui ${c.rd}, ${c.imm}`;
+    if (c.op === "lui" || c.op === "auipc") return `${c.op} ${c.rd}, ${c.imm}`;
     if (
-        [
-            "addi",
-            "andi",
-            "ori",
-            "xori",
-            "slli",
-            "srli",
-            "srai",
-        ].includes(c.op)
-    )
-        return `${c.op} ${c.rd}, ${c.rs1}, ${c.imm}`;
+        (["addi", "andi", "ori", "xori", "slli", "srli", "srai"] as string[]).includes(c.op)
+    ) {
+        const ci = c as ConcreteInstr & { rd: string; rs1: string; imm: number };
+        return `${ci.op} ${ci.rd}, ${ci.rs1}, ${ci.imm}`;
+    }
     if (
-        [
-            "add",
-            "sub",
-            "mul",
-            "div",
-            "rem",
-            "and",
-            "or",
-            "xor",
-            "sll",
-            "srl",
-            "sra",
-        ].includes(c.op)
-    )
-        return `${c.op} ${c.rd}, ${c.rs1}, ${c.rs2}`;
-    if (["sw", "sb", "sh"].includes(c.op))
+        (["add", "sub", "mul", "div", "rem", "and", "or", "xor", "sll", "srl", "sra"] as string[]).includes(c.op)
+    ) {
+        const ci = c as ConcreteInstr & { rd: string; rs1: string; rs2: string };
+        return `${ci.op} ${ci.rd}, ${ci.rs1}, ${ci.rs2}`;
+    }
+    if (c.op === "sw" || c.op === "sb" || c.op === "sh")
         return `${c.op} ${c.rs2}, ${c.offset}(${c.rs1})`;
-    if (["lw", "lb", "lh", "lbu", "lhu"].includes(c.op))
-        return `${c.op} ${c.rd}, ${c.offset}(${c.rs1})`;
-    if (["beq", "bne", "blt", "bge", "bltu", "bgeu"].includes(c.op))
-        return `${c.op} ${c.rs1}, ${c.rs2}, ${c.target}`;
+    if ((["lw", "lb", "lh", "lbu", "lhu"] as string[]).includes(c.op)) {
+        const ci = c as ConcreteInstr & { rd: string; offset: number; rs1: string };
+        return `${ci.op} ${ci.rd}, ${ci.offset}(${ci.rs1})`;
+    }
+    if ((["beq", "bne", "blt", "bge", "bltu", "bgeu"] as string[]).includes(c.op)) {
+        const ci = c as ConcreteInstr & { rs1: string; rs2: string; target: string };
+        return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${ci.target}`;
+    }
     return c.op;
 }
 
 // ─── Build assembly view ───────────────────────────────────────────────────
-function buildAsmView(prog) {
+function buildAsmView(prog: Program): void {
     const { sourceInstrs } = assembleProgram(prog);
-    const el = document.getElementById("view-asm");
+    const el = document.getElementById("view-asm")!;
     let html = "";
     let lastFn = null;
 
@@ -982,38 +950,39 @@ function buildAsmView(prog) {
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────
-let DISPLAY_REGS = [];
+let DISPLAY_REGS: DisplayReg[] = [];
 
-function computeDisplayRegs(prog) {
+function computeDisplayRegs(prog: Program): DisplayReg[] {
     const { sourceInstrs } = assembleProgram(prog);
     const used = new Set(["sp", "ra"]);
     for (const r of Object.keys(prog.initialRegs)) used.add(r);
     for (const si of sourceInstrs) {
         for (const c of si.concretes) {
-            for (const field of ["rd", "rs1", "rs2"]) {
-                if (c[field] && REG_META[c[field]])
-                    used.add(c[field]);
+            for (const field of ["rd", "rs1", "rs2"] as const) {
+                const val = (c as Record<string, unknown>)[field];
+                if (typeof val === "string" && REG_META[val as keyof typeof REG_META])
+                    used.add(val);
             }
         }
     }
     return ALL_REGS.filter((r) => used.has(r)).map((r) => ({
         name: r,
-        desc: REG_META[r]?.desc ?? "",
+        desc: REG_META[r as keyof typeof REG_META]?.desc ?? "",
         key: r,
     }));
 }
 
-function fmtRegVal(key, val) {
+function fmtRegVal(key: string, val: number | null): string {
     if (val == null) return RAND_REGS[key] ?? "?";
     return hx(val);
 }
 
-function render(s) {
+function render(s: Step): void {
     // Assembly highlight — keyed by instruction address
     document
         .querySelectorAll("#view-asm .line.hl")
         .forEach((el) => el.classList.remove("hl"));
-    clearTimeout(_hlTimeout);
+    clearTimeout(_hlTimeout ?? undefined);
     for (const addr of s.aHl || []) {
         const el = document.getElementById(
             "al-" + addr.toString(16),
@@ -1054,7 +1023,7 @@ function render(s) {
 
     // Registers
     const hiR = new Set(s.hiReg || []);
-    document.getElementById("reg-list").innerHTML =
+    document.getElementById("reg-list")!.innerHTML =
         DISPLAY_REGS.map((r) => {
             const val = s.regs ? s.regs[r.key] : null;
             const tip =
@@ -1077,24 +1046,24 @@ function render(s) {
     });
 
     // Controls
-    document.getElementById("step-counter").textContent =
+    document.getElementById("step-counter")!.textContent =
         `${cur + 1} / ${STEPS.length}`;
     const n = STEPS.length;
     const pct = n <= 1 ? 100 : (cur / (n - 1)) * 100;
-    document.getElementById("progress-fill").style.width =
+    (document.getElementById("progress-fill") as HTMLElement).style.width =
         pct + "%";
-    document.getElementById("progress-thumb").style.left =
+    (document.getElementById("progress-thumb") as HTMLElement).style.left =
         `clamp(7px, ${pct}%, calc(100% - 7px))`;
-    document.getElementById("btn-prev").disabled = cur === 0;
-    document.getElementById("btn-next").disabled =
+    (document.getElementById("btn-prev") as HTMLButtonElement).disabled = cur === 0;
+    (document.getElementById("btn-next") as HTMLButtonElement).disabled =
         cur === STEPS.length - 1;
 }
 
 // ─── Stack builder ────────────────────────────────────────────────────────
 // Slot IDs use lowercase hex address: "slot-ff0", "slot-1000", etc.
-function buildStack(s) {
+function buildStack(s: Step): void {
     const hiS = new Set(s.hiSlots || []);
-    const col = document.getElementById("stack-column");
+    const col = document.getElementById("stack-column")!;
     const currentSp = s.regs ? s.regs.sp : 0;
     const callerBase =
         s.callStack && s.callStack.length > 0
@@ -1181,7 +1150,7 @@ function buildStack(s) {
 // ─── SP arrow ─────────────────────────────────────────────────────────────
 let _firstArrowRender = true;
 
-function positionSpArrow(s) {
+function positionSpArrow(s: Step): void {
     const arrow = document.getElementById("sp-arrow");
     const wrapper = document.getElementById("stack-wrapper");
     if (!arrow || !wrapper) return;
@@ -1221,7 +1190,7 @@ function positionSpArrow(s) {
 }
 
 // ─── Frame labels ─────────────────────────────────────────────────────────
-function positionLabels(s) {
+function positionLabels(s: Step): void {
     const col = document.getElementById("stack-column");
     const labelsEl = document.getElementById("frame-labels");
     if (!col || !labelsEl) return;
@@ -1248,7 +1217,7 @@ function positionLabels(s) {
 }
 
 // ─── Offset arrows ────────────────────────────────────────────────────────
-function positionOffsets(s) {
+function positionOffsets(s: Step): void {
     const container = document.getElementById("offset-arrows");
     const wrapper = document.getElementById("stack-wrapper");
     if (!container || !wrapper) return;
@@ -1261,7 +1230,7 @@ function positionOffsets(s) {
     const slots = document.querySelectorAll(
         ".frame-slot[id^='slot-']",
     );
-    for (const slot of slots) {
+    for (const slot of slots as NodeListOf<HTMLElement>) {
         const addrHex = slot.id.slice(5); // "slot-ff0" → "ff0"
         const addr = parseInt(addrHex, 16);
         const offset = addr - spVal;
@@ -1278,38 +1247,36 @@ function positionOffsets(s) {
 }
 
 // ─── Tab switcher ─────────────────────────────────────────────────────────
-let _activeTab = "asm";
+let _activeTab: "asm" | "c" = "asm";
 
-function switchTab(tab) {
+function switchTab(tab: "asm" | "c"): void {
     _activeTab = tab;
-    document.getElementById("pane-asm").style.display =
+    (document.getElementById("pane-asm") as HTMLElement).style.display =
         tab === "asm" ? "" : "none";
-    document.getElementById("pane-c").style.display =
+    (document.getElementById("pane-c") as HTMLElement).style.display =
         tab === "c" ? "" : "none";
-    document
-        .getElementById("tab-asm")
+    document.getElementById("tab-asm")!
         .classList.toggle("active", tab === "asm");
-    document
-        .getElementById("tab-c")
+    document.getElementById("tab-c")!
         .classList.toggle("active", tab === "c");
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────
-let _hlTimeout = null;
+let _hlTimeout: ReturnType<typeof setTimeout> | null = null;
 let cur = 0;
-let STEPS = [];
+let STEPS: Step[] = [];
 
-function goTo(idx) {
+function goTo(idx: number): void {
     cur = Math.max(0, Math.min(STEPS.length - 1, idx));
-    render(STEPS[cur]);
+    render(STEPS[cur]!);
 }
 
-function go(dir) {
+function go(dir: number): void {
     goTo(cur + dir);
 }
 
 // ─── Program loader ───────────────────────────────────────────────────────
-function buildTicks() {
+function buildTicks(): void {
     bar.querySelectorAll(".step-tick").forEach((el) => el.remove());
     const n = STEPS.length;
     for (let i = 1; i < n - 1; i++) {
@@ -1320,23 +1287,23 @@ function buildTicks() {
     }
 }
 
-function loadProgram(prog) {
+function loadProgram(prog: Program): void {
     switchTab("asm");
-    const cTab = document.getElementById("tab-c");
+    const cTab = document.getElementById("tab-c") as HTMLButtonElement;
     if (prog.cCode) {
-        document.getElementById("view-c").innerHTML = highlightC(
+        document.getElementById("view-c")!.innerHTML = highlightC(
             prog.cCode,
         );
         cTab.disabled = false;
     } else {
-        document.getElementById("view-c").textContent = "";
+        document.getElementById("view-c")!.textContent = "";
         cTab.disabled = true;
     }
 
     // Validate that entryPoint names a defined function
     if (!(prog.entryPoint in prog.functions)) {
         buildAsmView(prog);
-        document.getElementById("stack-area").innerHTML =
+        document.getElementById("stack-area")!.innerHTML =
             `<div style="padding:32px 24px;color:var(--red);font-family:var(--mono);font-size:15px;line-height:1.8;max-width:420px">` +
             `<div style="font-weight:600;font-size:17px;margin-bottom:12px">Error de configuración</div>` +
             `Punto de entrada <code>${prog.entryPoint}</code> no existe en las funciones definidas.<br><br>` +
@@ -1347,10 +1314,10 @@ function loadProgram(prog) {
                 .join(", ")}. ` +
             `Ajusta <code>entryPoint</code>.</span>` +
             `</div>`;
-        document.getElementById("step-counter").textContent =
+        document.getElementById("step-counter")!.textContent =
             "— / —";
-        document.getElementById("btn-prev").disabled = true;
-        document.getElementById("btn-next").disabled = true;
+        (document.getElementById("btn-prev") as HTMLButtonElement).disabled = true;
+        (document.getElementById("btn-next") as HTMLButtonElement).disabled = true;
         return;
     }
 
@@ -1363,7 +1330,7 @@ function loadProgram(prog) {
     const initRa = prog.initialRegs.ra ?? 0;
     if (initRa >= progStart && initRa < progEnd) {
         buildAsmView(prog);
-        document.getElementById("stack-area").innerHTML =
+        document.getElementById("stack-area")!.innerHTML =
             `<div style="padding:32px 24px;color:var(--red);font-family:var(--mono);font-size:15px;line-height:1.8;max-width:420px">` +
             `<div style="font-weight:600;font-size:17px;margin-bottom:12px">Error de configuración</div>` +
             `<code>ra</code> inicial (<code>${hx(initRa)}</code>) apunta dentro del rango del programa` +
@@ -1371,10 +1338,10 @@ function loadProgram(prog) {
             `<span style="color:var(--text-dim)">El simulador no puede determinar cuándo termina la ejecución. ` +
             `Ajusta <code>initialRegs.ra</code> a una dirección fuera del programa.</span>` +
             `</div>`;
-        document.getElementById("step-counter").textContent =
+        document.getElementById("step-counter")!.textContent =
             "— / —";
-        document.getElementById("btn-prev").disabled = true;
-        document.getElementById("btn-next").disabled = true;
+        (document.getElementById("btn-prev") as HTMLButtonElement).disabled = true;
+        (document.getElementById("btn-next") as HTMLButtonElement).disabled = true;
         return;
     }
 
@@ -1383,25 +1350,25 @@ function loadProgram(prog) {
     STEPS = simulate(prog);
     cur = 0;
     buildAsmView(prog);
-    render(STEPS[0]);
+    render(STEPS[0]!);
     buildTicks();
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────
-const rh = () =>
+const rh = (): string =>
     "0x" +
     Math.floor(Math.random() * 0xffffffff)
         .toString(16)
         .toUpperCase()
         .padStart(8, "0");
-const RAND_REGS = {};
+const RAND_REGS: Record<string, string> = {};
 for (const r of ALL_REGS) RAND_REGS[r] = rh();
 
 // Progress bar scrubber
-const bar = document.querySelector(".progress-bar");
-const fill = document.getElementById("progress-fill");
-const thumb = document.getElementById("progress-thumb");
-function scrubTo(e) {
+const bar = document.querySelector(".progress-bar") as HTMLElement;
+const fill = document.getElementById("progress-fill") as HTMLElement;
+const thumb = document.getElementById("progress-thumb") as HTMLElement;
+function scrubTo(e: PointerEvent): void {
     const rect = bar.getBoundingClientRect();
     const ratio = Math.min(
         1,
@@ -1426,19 +1393,19 @@ bar.addEventListener("pointerup", (e) => {
 });
 
 // Populate program selector
-const sel = document.getElementById("prog-select");
+const sel = document.getElementById("prog-select") as HTMLSelectElement;
 PROGRAMS.forEach((p, i) => {
     const opt = document.createElement("option");
-    opt.value = i;
+    opt.value = String(i);
     opt.textContent = p.name;
     sel.appendChild(opt);
 });
 sel.addEventListener("change", () =>
-    loadProgram(PROGRAMS[parseInt(sel.value)]),
+    loadProgram(PROGRAMS[parseInt(sel.value)]!),
 );
 
 // Build persistent stack skeleton (arrow + column + labels)
-document.getElementById("stack-area").innerHTML = `
+document.getElementById("stack-area")!.innerHTML = `
   <div class="stack-wrapper" id="stack-wrapper">
     <div class="offset-arrows" id="offset-arrows"></div>
     <div class="sp-arrow" id="sp-arrow"><span class="sp-label">sp</span><span class="sp-arrow-shaft"></span><span class="sp-arrow-head"></span></div>
@@ -1455,16 +1422,16 @@ tt.id = "tooltip";
 document.body.appendChild(tt);
 
 document.addEventListener("mouseover", (e) => {
-    const el = e.target.closest("[data-tooltip]");
+    const el = (e.target as Element | null)?.closest("[data-tooltip]") as HTMLElement | null;
     if (!el) {
         tt.style.display = "none";
         return;
     }
-    tt.textContent = el.dataset.tooltip;
+    tt.textContent = el.dataset["tooltip"] ?? null;
     tt.style.display = "block";
 });
 document.addEventListener("mouseout", (e) => {
-    if (!e.target.closest("[data-tooltip]")) return;
+    if (!(e.target as Element | null)?.closest("[data-tooltip]")) return;
     tt.style.display = "none";
 });
 document.addEventListener("mousemove", (e) => {
