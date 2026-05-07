@@ -839,7 +839,7 @@
                         op: op === "jal" ? "call" : op,
                         target: args[args.length - 1],
                     };
-                if (op === "li")
+                if (op === "li" || op === "lui")
                     return { op, rd: args[0], imm: Number(args[1]) };
                 if (op === "mv") return { op, rd: args[0], rs1: args[1] };
                 if (op === "neg") return { op, rd: args[0], rs1: args[1] };
@@ -1346,11 +1346,29 @@
                         }
 
                         case "li": {
-                            regs[instr.rd] = instr.imm;
+                            const val = instr.imm;
+                            regs[instr.rd] = val;
                             syncFpS0(instr.rd);
                             pc += 4;
                             hiReg = [instr.rd];
-                            desc = `<code>li ${instr.rd}, ${instr.imm}</code> — carga el inmediato <b>${instr.imm}</b> en <code>${instr.rd}</code>.`;
+                            const fits12 = val >= -2048 && val <= 2047;
+                            if (fits12) {
+                                desc = `<code>li ${instr.rd}, ${val}</code> — equivale a <code>addi ${instr.rd}, zero, ${val}</code>; <code>${instr.rd}</code> = <b>${val}</b>.`;
+                            } else {
+                                const lo = val << 20 >> 20;
+                                const hi = (val - lo) >> 12;
+                                desc = `<code>li ${instr.rd}, ${hx(val)}</code> — equivale a <code>lui ${instr.rd}, ${hi}</code> + <code>addi ${instr.rd}, ${instr.rd}, ${lo}</code>; <code>${instr.rd}</code> = <b>${hx(val)}</b>.`;
+                            }
+                            break;
+                        }
+
+                        case "lui": {
+                            const val = instr.imm << 12;
+                            regs[instr.rd] = val;
+                            syncFpS0(instr.rd);
+                            pc += 4;
+                            hiReg = [instr.rd];
+                            desc = `<code>lui ${instr.rd}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${instr.imm} << 12 = <b>${hx(val)}</b>.`;
                             break;
                         }
 
