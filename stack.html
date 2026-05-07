@@ -832,14 +832,7 @@
                     ? argStr.split(",").map((a) => a.trim())
                     : [];
 
-                if (op === "ret")
-                    return {
-                        op: "jalr",
-                        rd: "zero",
-                        rs1: "ra",
-                        imm: 0,
-                        pseudo: "ret",
-                    };
+                if (op === "ret") return { op: "ret" };
                 if (op === "jalr")
                     return {
                         op,
@@ -847,11 +840,11 @@
                         rs1: args[1],
                         imm: Number(args[2]),
                     };
-                if (op === "call" || op === "j" || op === "jal")
-                    return {
-                        op: op === "jal" ? "call" : op,
-                        target: args[args.length - 1],
-                    };
+                if (op === "call") return { op: "call", target: args[0] };
+                if (op === "j")    return { op: "j",    target: args[0] };
+                if (op === "jal")  return { op: "jal",
+                                            rd: args.length > 1 ? args[0] : "ra",
+                                            target: args[args.length - 1] };
                 if (op === "li" || op === "lui")
                     return { op, rd: args[0], imm: Number(args[1]) };
                 if (op === "mv") return { op, rd: args[0], rs1: args[1] };
@@ -924,9 +917,40 @@
                 return { op, raw: s };
             }
 
+            // ─── Pseudo-instruction expander ─────────────────────────────────────────
+            function expandPseudo(parsed) {
+                const { op, rd, rs1, imm } = parsed;
+                switch (op) {
+                    case "ret":
+                        return { ...parsed, instrs: [{ op: "jalr", rd: "zero", rs1: "ra", imm: 0 }] };
+                    case "mv":
+                        return { ...parsed, instrs: [{ op: "addi", rd, rs1, imm: 0 }] };
+                    case "nop":
+                        return { ...parsed, instrs: [{ op: "addi", rd: "zero", rs1: "zero", imm: 0 }] };
+                    case "neg":
+                        return { ...parsed, instrs: [{ op: "sub", rd, rs1: "zero", rs2: rs1 }] };
+                    case "call":
+                        return { ...parsed, instrs: [{ op: "jal", rd: "ra",   target: parsed.target }] };
+                    case "j":
+                        return { ...parsed, instrs: [{ op: "jal", rd: "zero", target: parsed.target }] };
+                    case "li": {
+                        if (imm >= -2048 && imm <= 2047)
+                            return { ...parsed, instrs: [{ op: "addi", rd, rs1: "zero", imm }] };
+                        const lo = (imm << 20) >> 20;
+                        const hi = (imm - lo) >> 12;
+                        return { ...parsed, instrs: [
+                            { op: "lui",  rd, imm: hi },
+                            { op: "addi", rd, rs1: rd, imm: lo },
+                        ]};
+                    }
+                    default:
+                        return parsed;
+                }
+            }
+
             // ─── Assembler: assign addresses ──────────────────────────────────────────
             function assembleProgram(prog) {
-                const instrs = []; // { fn, addr, raw, ...parsed }
+                const instrs = []; // { fn, addr, raw, from, ...concrete }
                 const labels = {}; // fn name → first address
                 let addr = prog.baseAddress;
 
@@ -934,8 +958,14 @@
                     labels[fn] = addr;
                     for (const line of lines) {
                         const parsed = parseInstr(line);
-                        instrs.push({ fn, addr, raw: line.trim(), ...parsed });
-                        addr += 4;
+                        const expanded = expandPseudo(parsed);
+                        const concretes = expanded.instrs ?? [expanded];
+                        for (const concrete of concretes) {
+                            instrs.push({ fn, addr, raw: line.trim(),
+                                          from: expanded.instrs ? expanded : null,
+                                          ...concrete });
+                            addr += 4;
+                        }
                     }
                 }
                 return { instrs, labels };
@@ -1203,7 +1233,6 @@
                     let desc = "",
                         hiReg = [],
                         hiSlots = [];
-                    let stepPushed = false; // set by ret to avoid double-push
 
                     switch (instr.op) {
                         case "addi":
@@ -1243,6 +1272,12 @@
                                     desc = `<b>Prólogo</b>: <code>addi sp, sp, ${instr.imm}</code> — reserva ${-instr.imm} bytes en la pila. <code>sp</code> baja a <code>${hx(val)}</code>.`;
                                 else
                                     desc = `<b>Epílogo</b>: <code>addi sp, sp, +${instr.imm}</code> — libera ${instr.imm} bytes. <code>sp</code> sube a <code>${hx(val)}</code>.`;
+                            } else if (instr.from?.op === "mv") {
+                                desc = `<code>mv ${instr.rd}, ${instr.rs1}</code> — <code>${instr.rd}</code> ← <code>${instr.rs1}</code> = <b>${val}</b>.`;
+                            } else if (instr.from?.op === "nop") {
+                                desc = `<code>nop</code> — no operation.`;
+                            } else if (instr.from?.op === "li") {
+                                desc = `<code>li ${instr.from.rd}, ${instr.from.imm}</code> — equivale a <code>addi ${instr.rd}, zero, ${instr.imm}</code>; <code>${instr.rd}</code> = <b>${val}</b>.`;
                             } else {
                                 desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} ${instr.op === "addi" ? "+" : ""} ${instr.imm} = <b>${val}</b>.`;
                             }
@@ -1315,7 +1350,11 @@
                             syncFpS0(instr.rd);
                             pc += 4;
                             hiReg = [instr.rd];
-                            desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.rs2}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} ${syms[instr.op]} ${prev[instr.rs2]} = <b>${val}</b>.`;
+                            if (instr.from?.op === "neg") {
+                                desc = `<code>neg ${instr.rd}, ${instr.rs2}</code> — <code>${instr.rd}</code> = -${prev[instr.rs2]} = <b>${val}</b>.`;
+                            } else {
+                                desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.rs2}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} ${syms[instr.op]} ${prev[instr.rs2]} = <b>${val}</b>.`;
+                            }
                             break;
                         }
 
@@ -1347,79 +1386,47 @@
                             break;
                         }
 
-                        case "mv": {
-                            regs[instr.rd] = regs[instr.rs1];
-                            syncFpS0(instr.rd);
-                            pc += 4;
-                            hiReg = [instr.rd];
-                            desc = `<code>mv ${instr.rd}, ${instr.rs1}</code> — <code>${instr.rd}</code> ← <code>${instr.rs1}</code> = <b>${prev[instr.rs1]}</b>.`;
-                            break;
-                        }
-
-                        case "neg": {
-                            regs[instr.rd] = -regs[instr.rs1];
-                            syncFpS0(instr.rd);
-                            pc += 4;
-                            hiReg = [instr.rd];
-                            desc = `<code>neg ${instr.rd}, ${instr.rs1}</code> — <code>${instr.rd}</code> = -${prev[instr.rs1]} = <b>${regs[instr.rd]}</b>.`;
-                            break;
-                        }
-
-                        case "li": {
-                            const val = instr.imm;
-                            regs[instr.rd] = val;
-                            syncFpS0(instr.rd);
-                            pc += 4;
-                            hiReg = [instr.rd];
-                            const fits12 = val >= -2048 && val <= 2047;
-                            if (fits12) {
-                                desc = `<code>li ${instr.rd}, ${val}</code> — equivale a <code>addi ${instr.rd}, zero, ${val}</code>; <code>${instr.rd}</code> = <b>${val}</b>.`;
-                            } else {
-                                const lo = (val << 20) >> 20;
-                                const hi = (val - lo) >> 12;
-                                desc = `<code>li ${instr.rd}, ${hx(val)}</code> — equivale a <code>lui ${instr.rd}, ${hi}</code> + <code>addi ${instr.rd}, ${instr.rd}, ${lo}</code>; <code>${instr.rd}</code> = <b>${hx(val)}</b>.`;
-                            }
-                            break;
-                        }
-
                         case "lui": {
                             const val = instr.imm << 12;
                             regs[instr.rd] = val;
                             syncFpS0(instr.rd);
                             pc += 4;
                             hiReg = [instr.rd];
-                            desc = `<code>lui ${instr.rd}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${instr.imm} << 12 = <b>${hx(val)}</b>.`;
+                            if (instr.from?.op === "li") {
+                                desc = `<code>lui</code> (parte alta de <code>li ${instr.from.rd}, ${hx(instr.from.imm)}</code>) — <code>${instr.rd}</code> = <b>${hx(val)}</b>.`;
+                            } else {
+                                desc = `<code>lui ${instr.rd}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${instr.imm} << 12 = <b>${hx(val)}</b>.`;
+                            }
                             break;
                         }
 
-                        case "call": {
+                        case "jal": {
                             const target = labels[instr.target];
                             if (target == null) {
                                 pc += 4;
-                                desc = `<code>call ${instr.target}</code> — función no encontrada.`;
+                                desc = `<code>${instr.from?.op ?? "jal"} ${instr.target}</code> — etiqueta no encontrada.`;
                                 break;
                             }
-                            regs.ra = pc + 4;
-                            pc = target;
-                            callStack.push({
-                                fn: instr.target,
-                                entrySpBefore: regs.sp,
-                                allocatedSize: 0,
-                            });
-                            hiReg = ["ra"];
-                            desc = `<code>call ${instr.target}</code> — guarda dirección de retorno en <code>ra</code> = <code>${hx(regs.ra)}</code> y salta a <code>${instr.target}</code>.`;
-                            break;
-                        }
-
-                        case "j": {
-                            const target = labels[instr.target];
-                            if (target == null) {
-                                pc += 4;
-                                desc = `<code>j ${instr.target}</code> — etiqueta no encontrada.`;
-                                break;
+                            if (instr.rd !== "zero") {
+                                regs[instr.rd] = pc + 4;
+                                syncFpS0(instr.rd);
+                                hiReg = [instr.rd];
                             }
                             pc = target;
-                            desc = `<code>j ${instr.target}</code> — salta incondicionalmente a <code>${instr.target}</code>.`;
+                            if (instr.from?.op === "call") {
+                                callStack.push({
+                                    fn: instr.target,
+                                    entrySpBefore: regs.sp,
+                                    allocatedSize: 0,
+                                });
+                                desc = `<code>call ${instr.target}</code> — guarda dirección de retorno en <code>ra</code> = <code>${hx(regs.ra)}</code> y salta a <code>${instr.target}</code>.`;
+                            } else if (instr.from?.op === "j") {
+                                desc = `<code>j ${instr.target}</code> — salta incondicionalmente a <code>${hx(target)}</code>.`;
+                            } else {
+                                desc = `<code>jal ${instr.rd}, ${instr.target}</code> — `
+                                     + (instr.rd !== "zero" ? `<code>${instr.rd}</code> = <code>${hx(regs[instr.rd])}</code>, ` : "")
+                                     + `PC ← <code>${hx(target)}</code>.`;
+                            }
                             break;
                         }
 
@@ -1447,12 +1454,6 @@
                             break;
                         }
 
-                        case "nop": {
-                            pc += 4;
-                            desc = `<code>nop</code> — no operation.`;
-                            break;
-                        }
-
                         case "jalr": {
                             const target = (regs[instr.rs1] + instr.imm) & ~1;
                             const linkAddr = pc + 4;
@@ -1463,7 +1464,7 @@
                             }
                             pc = target;
 
-                            if (instr.pseudo === "ret") {
+                            if (instr.from?.op === "ret") {
                                 hiReg = ["ra", "a0"];
                                 desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(target)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
                             } else {
@@ -1484,17 +1485,9 @@
                         }
                     }
 
-                    if (!stepPushed)
-                        steps.push(
-                            makeStep(
-                                snap(),
-                                desc,
-                                hiReg,
-                                hiSlots,
-                                instrAddr,
-                                pc,
-                            ),
-                        );
+                    steps.push(
+                        makeStep(snap(), desc, hiReg, hiSlots, instrAddr, pc),
+                    );
                 }
 
                 return steps;
