@@ -841,10 +841,13 @@
                         imm: Number(args[2]),
                     };
                 if (op === "call") return { op: "call", target: args[0] };
-                if (op === "j")    return { op: "j",    target: args[0] };
-                if (op === "jal")  return { op: "jal",
-                                            rd: args.length > 1 ? args[0] : "ra",
-                                            target: args[args.length - 1] };
+                if (op === "j") return { op: "j", target: args[0] };
+                if (op === "jal")
+                    return {
+                        op: "jal",
+                        rd: args.length > 1 ? args[0] : "ra",
+                        target: args[args.length - 1],
+                    };
                 if (op === "li" || op === "lui")
                     return { op, rd: args[0], imm: Number(args[1]) };
                 if (op === "mv") return { op, rd: args[0], rs1: args[1] };
@@ -922,26 +925,62 @@
                 const { op, rd, rs1, imm } = parsed;
                 switch (op) {
                     case "ret":
-                        return { ...parsed, instrs: [{ op: "jalr", rd: "zero", rs1: "ra", imm: 0 }] };
+                        return {
+                            ...parsed,
+                            instrs: [
+                                { op: "jalr", rd: "zero", rs1: "ra", imm: 0 },
+                            ],
+                        };
                     case "mv":
-                        return { ...parsed, instrs: [{ op: "addi", rd, rs1, imm: 0 }] };
+                        return {
+                            ...parsed,
+                            instrs: [{ op: "addi", rd, rs1, imm: 0 }],
+                        };
                     case "nop":
-                        return { ...parsed, instrs: [{ op: "addi", rd: "zero", rs1: "zero", imm: 0 }] };
+                        return {
+                            ...parsed,
+                            instrs: [
+                                { op: "addi", rd: "zero", rs1: "zero", imm: 0 },
+                            ],
+                        };
                     case "neg":
-                        return { ...parsed, instrs: [{ op: "sub", rd, rs1: "zero", rs2: rs1 }] };
+                        return {
+                            ...parsed,
+                            instrs: [{ op: "sub", rd, rs1: "zero", rs2: rs1 }],
+                        };
                     case "call":
-                        return { ...parsed, instrs: [{ op: "jal", rd: "ra",   target: parsed.target }] };
+                        return {
+                            ...parsed,
+                            instrs: [
+                                { op: "jal", rd: "ra", target: parsed.target },
+                            ],
+                        };
                     case "j":
-                        return { ...parsed, instrs: [{ op: "jal", rd: "zero", target: parsed.target }] };
+                        return {
+                            ...parsed,
+                            instrs: [
+                                {
+                                    op: "jal",
+                                    rd: "zero",
+                                    target: parsed.target,
+                                },
+                            ],
+                        };
                     case "li": {
                         if (imm >= -2048 && imm <= 2047)
-                            return { ...parsed, instrs: [{ op: "addi", rd, rs1: "zero", imm }] };
+                            return {
+                                ...parsed,
+                                instrs: [{ op: "addi", rd, rs1: "zero", imm }],
+                            };
                         const lo = (imm << 20) >> 20;
                         const hi = (imm - lo) >> 12;
-                        return { ...parsed, instrs: [
-                            { op: "lui",  rd, imm: hi },
-                            { op: "addi", rd, rs1: rd, imm: lo },
-                        ]};
+                        return {
+                            ...parsed,
+                            instrs: [
+                                { op: "lui", rd, imm: hi },
+                                { op: "addi", rd, rs1: rd, imm: lo },
+                            ],
+                        };
                     }
                     default:
                         return parsed;
@@ -950,8 +989,9 @@
 
             // ─── Assembler: assign addresses ──────────────────────────────────────────
             function assembleProgram(prog) {
-                const instrs = []; // { fn, addr, raw, from, ...concrete }
-                const labels = {}; // fn name → first address
+                const sourceInstrs = [];
+                const addrToSourceIdx = new Map();
+                const labels = {};
                 let addr = prog.baseAddress;
 
                 for (const [fn, lines] of Object.entries(prog.functions)) {
@@ -959,16 +999,24 @@
                     for (const line of lines) {
                         const parsed = parseInstr(line);
                         const expanded = expandPseudo(parsed);
-                        const concretes = expanded.instrs ?? [expanded];
-                        for (const concrete of concretes) {
-                            instrs.push({ fn, addr, raw: line.trim(),
-                                          from: expanded.instrs ? expanded : null,
-                                          ...concrete });
+                        const concreteSpecs = expanded.instrs ?? [expanded];
+                        const firstAddr = addr;
+                        const concretes = [];
+                        for (const spec of concreteSpecs) {
+                            addrToSourceIdx.set(addr, sourceInstrs.length);
+                            concretes.push({ fn, addr, ...spec });
                             addr += 4;
                         }
+                        sourceInstrs.push({
+                            fn,
+                            raw: line.trim(),
+                            parsed,
+                            concretes,
+                            firstAddr,
+                        });
                     }
                 }
-                return { instrs, labels };
+                return { sourceInstrs, addrToSourceIdx, labels };
             }
 
             // ─── Syntax highlighter ───────────────────────────────────────────────────
@@ -1138,8 +1186,8 @@
 
             // ─── Simulator ────────────────────────────────────────────────────────────
             function simulate(prog) {
-                const { instrs, labels } = assembleProgram(prog);
-                const addrMap = new Map(instrs.map((i) => [i.addr, i]));
+                const { sourceInstrs, addrToSourceIdx, labels } =
+                    assembleProgram(prog);
 
                 // Initialize registers (all zero, then apply initialRegs)
                 const regs = {};
@@ -1225,82 +1273,100 @@
                 const MAX_STEPS = 500;
 
                 while (steps.length < MAX_STEPS) {
-                    const instr = addrMap.get(pc);
-                    if (!instr) break;
+                    const siIdx = addrToSourceIdx.get(pc);
+                    if (siIdx == null) break;
+                    const si = sourceInstrs[siIdx];
 
                     const prev = { ...regs };
-                    const instrAddr = pc;
+                    const instrAddr = si.firstAddr;
                     let desc = "",
                         hiReg = [],
                         hiSlots = [];
 
-                    switch (instr.op) {
+                    switch (si.parsed.op) {
                         case "addi":
                         case "andi":
                         case "ori":
                         case "xori": {
+                            const c = si.concretes[0];
                             const ops = {
                                 addi: (a, b) => a + b,
                                 andi: (a, b) => a & b,
                                 ori: (a, b) => a | b,
                                 xori: (a, b) => a ^ b,
                             };
-                            const val = ops[instr.op](
-                                regs[instr.rs1],
-                                instr.imm,
-                            );
-                            regs[instr.rd] = val;
-                            syncFpS0(instr.rd);
+                            const val = ops[si.parsed.op](regs[c.rs1], c.imm);
+                            regs[c.rd] = val;
+                            syncFpS0(c.rd);
                             pc += 4;
-                            hiReg = [instr.rd];
+                            hiReg = [c.rd];
 
-                            if (instr.op === "addi" && instr.rd === "sp") {
+                            if (c.rd === "sp") {
                                 let top = null;
                                 for (
                                     let i = callStack.length - 1;
                                     i >= 0;
                                     i--
                                 ) {
-                                    if (callStack[i].fn === instr.fn) {
+                                    if (callStack[i].fn === si.fn) {
                                         top = callStack[i];
                                         break;
                                     }
                                 }
                                 if (!top) top = callStack[callStack.length - 1];
                                 top.allocatedSize = top.entrySpBefore - val;
-                                if (instr.imm < 0)
-                                    desc = `<b>Prólogo</b>: <code>addi sp, sp, ${instr.imm}</code> — reserva ${-instr.imm} bytes en la pila. <code>sp</code> baja a <code>${hx(val)}</code>.`;
+                                if (c.imm < 0)
+                                    desc = `<b>Prólogo</b>: <code>addi sp, sp, ${c.imm}</code> — reserva ${-c.imm} bytes en la pila. <code>sp</code> baja a <code>${hx(val)}</code>.`;
                                 else
-                                    desc = `<b>Epílogo</b>: <code>addi sp, sp, +${instr.imm}</code> — libera ${instr.imm} bytes. <code>sp</code> sube a <code>${hx(val)}</code>.`;
-                            } else if (instr.from?.op === "mv") {
-                                desc = `<code>mv ${instr.rd}, ${instr.rs1}</code> — <code>${instr.rd}</code> ← <code>${instr.rs1}</code> = <b>${val}</b>.`;
-                            } else if (instr.from?.op === "nop") {
-                                desc = `<code>nop</code> — no operation.`;
-                            } else if (instr.from?.op === "li") {
-                                desc = `<code>li ${instr.from.rd}, ${instr.from.imm}</code> — equivale a <code>addi ${instr.rd}, zero, ${instr.imm}</code>; <code>${instr.rd}</code> = <b>${val}</b>.`;
+                                    desc = `<b>Epílogo</b>: <code>addi sp, sp, +${c.imm}</code> — libera ${c.imm} bytes. <code>sp</code> sube a <code>${hx(val)}</code>.`;
                             } else {
-                                desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} ${instr.op === "addi" ? "+" : ""} ${instr.imm} = <b>${val}</b>.`;
+                                desc = `<code>${si.parsed.op} ${c.rd}, ${c.rs1}, ${c.imm}</code> — <code>${c.rd}</code> = ${prev[c.rs1]} ${si.parsed.op === "addi" ? "+" : ""} ${c.imm} = <b>${val}</b>.`;
                             }
+                            break;
+                        }
+
+                        case "mv": {
+                            const c = si.concretes[0];
+                            const val = regs[c.rs1];
+                            regs[c.rd] = val;
+                            syncFpS0(c.rd);
+                            pc += 4;
+                            hiReg = [c.rd];
+                            desc = `<code>mv ${si.parsed.rd}, ${si.parsed.rs1}</code> — <code>${si.parsed.rd}</code> ← <code>${si.parsed.rs1}</code> = <b>${val}</b>.`;
+                            break;
+                        }
+
+                        case "nop": {
+                            pc += 4;
+                            desc = `<code>nop</code> — no operation.`;
+                            break;
+                        }
+
+                        case "neg": {
+                            const val = -prev[si.parsed.rs1];
+                            regs[si.parsed.rd] = val;
+                            syncFpS0(si.parsed.rd);
+                            pc += 4;
+                            hiReg = [si.parsed.rd];
+                            desc = `<code>neg ${si.parsed.rd}, ${si.parsed.rs1}</code> — <code>${si.parsed.rd}</code> = -${prev[si.parsed.rs1]} = <b>${val}</b>.`;
                             break;
                         }
 
                         case "slli":
                         case "srli":
                         case "srai": {
+                            const c = si.concretes[0];
                             const ops = {
                                 slli: (a, b) => a << b,
                                 srli: (a, b) => a >>> b,
                                 srai: (a, b) => a >> b,
                             };
-                            const val = ops[instr.op](
-                                regs[instr.rs1],
-                                instr.imm,
-                            );
-                            regs[instr.rd] = val;
-                            syncFpS0(instr.rd);
+                            const val = ops[si.parsed.op](regs[c.rs1], c.imm);
+                            regs[c.rd] = val;
+                            syncFpS0(c.rd);
                             pc += 4;
-                            hiReg = [instr.rd];
-                            desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} shift ${instr.imm} = <b>${val}</b>.`;
+                            hiReg = [c.rd];
+                            desc = `<code>${si.parsed.op} ${c.rd}, ${c.rs1}, ${c.imm}</code> — <code>${c.rd}</code> = ${prev[c.rs1]} shift ${c.imm} = <b>${val}</b>.`;
                             break;
                         }
 
@@ -1315,6 +1381,7 @@
                         case "sll":
                         case "srl":
                         case "sra": {
+                            const c = si.concretes[0];
                             const ops = {
                                 add: (a, b) => a + b,
                                 sub: (a, b) => a - b,
@@ -1342,31 +1409,28 @@
                                 srl: ">>>",
                                 sra: ">>",
                             };
-                            const val = ops[instr.op](
-                                regs[instr.rs1],
-                                regs[instr.rs2],
+                            const val = ops[si.parsed.op](
+                                regs[c.rs1],
+                                regs[c.rs2],
                             );
-                            regs[instr.rd] = val;
-                            syncFpS0(instr.rd);
+                            regs[c.rd] = val;
+                            syncFpS0(c.rd);
                             pc += 4;
-                            hiReg = [instr.rd];
-                            if (instr.from?.op === "neg") {
-                                desc = `<code>neg ${instr.rd}, ${instr.rs2}</code> — <code>${instr.rd}</code> = -${prev[instr.rs2]} = <b>${val}</b>.`;
-                            } else {
-                                desc = `<code>${instr.op} ${instr.rd}, ${instr.rs1}, ${instr.rs2}</code> — <code>${instr.rd}</code> = ${prev[instr.rs1]} ${syms[instr.op]} ${prev[instr.rs2]} = <b>${val}</b>.`;
-                            }
+                            hiReg = [c.rd];
+                            desc = `<code>${si.parsed.op} ${c.rd}, ${c.rs1}, ${c.rs2}</code> — <code>${c.rd}</code> = ${prev[c.rs1]} ${syms[si.parsed.op]} ${prev[c.rs2]} = <b>${val}</b>.`;
                             break;
                         }
 
                         case "sw":
                         case "sb":
                         case "sh": {
-                            const addr = regs[instr.rs1] + instr.offset;
-                            mem.set(addr, regs[instr.rs2]);
-                            slotLabels.set(addr, instr.rs2);
+                            const c = si.concretes[0];
+                            const addr = regs[c.rs1] + c.offset;
+                            mem.set(addr, regs[c.rs2]);
+                            slotLabels.set(addr, c.rs2);
                             pc += 4;
                             hiSlots = [addr];
-                            desc = `<code>${instr.op} ${instr.rs2}, ${instr.offset}(${instr.rs1})</code> — guarda <code>${instr.rs2}</code> = ${fmtVal(instr.rs2, regs[instr.rs2])} en dirección <code>${hx(addr)}</code>.`;
+                            desc = `<code>${si.parsed.op} ${c.rs2}, ${c.offset}(${c.rs1})</code> — guarda <code>${c.rs2}</code> = ${fmtVal(c.rs2, regs[c.rs2])} en dirección <code>${hx(addr)}</code>.`;
                             break;
                         }
 
@@ -1375,58 +1439,124 @@
                         case "lh":
                         case "lbu":
                         case "lhu": {
-                            const addr = regs[instr.rs1] + instr.offset;
+                            const c = si.concretes[0];
+                            const addr = regs[c.rs1] + c.offset;
                             const val = mem.get(addr) ?? 0;
-                            regs[instr.rd] = val;
-                            syncFpS0(instr.rd);
+                            regs[c.rd] = val;
+                            syncFpS0(c.rd);
                             pc += 4;
-                            hiReg = [instr.rd];
+                            hiReg = [c.rd];
                             hiSlots = [addr];
-                            desc = `<code>${instr.op} ${instr.rd}, ${instr.offset}(${instr.rs1})</code> — restaura <code>${instr.rd}</code> = <b>${fmtVal(instr.rd, val)}</b> desde dirección <code>${hx(addr)}</code>.`;
+                            desc = `<code>${si.parsed.op} ${c.rd}, ${c.offset}(${c.rs1})</code> — restaura <code>${c.rd}</code> = <b>${fmtVal(c.rd, val)}</b> desde dirección <code>${hx(addr)}</code>.`;
+                            break;
+                        }
+
+                        case "li": {
+                            for (const c of si.concretes) {
+                                if (c.op === "lui") {
+                                    regs[c.rd] = c.imm << 12;
+                                    syncFpS0(c.rd);
+                                } else {
+                                    regs[c.rd] = regs[c.rs1] + c.imm;
+                                    syncFpS0(c.rd);
+                                }
+                                pc += 4;
+                            }
+                            hiReg = [si.parsed.rd];
+                            desc = `<code>li ${si.parsed.rd}, ${si.parsed.imm}</code> — <code>${si.parsed.rd}</code> = <b>${regs[si.parsed.rd]}</b>.`;
                             break;
                         }
 
                         case "lui": {
-                            const val = instr.imm << 12;
-                            regs[instr.rd] = val;
-                            syncFpS0(instr.rd);
+                            const c = si.concretes[0];
+                            const val = c.imm << 12;
+                            regs[c.rd] = val;
+                            syncFpS0(c.rd);
                             pc += 4;
-                            hiReg = [instr.rd];
-                            if (instr.from?.op === "li") {
-                                desc = `<code>lui</code> (parte alta de <code>li ${instr.from.rd}, ${hx(instr.from.imm)}</code>) — <code>${instr.rd}</code> = <b>${hx(val)}</b>.`;
-                            } else {
-                                desc = `<code>lui ${instr.rd}, ${instr.imm}</code> — <code>${instr.rd}</code> = ${instr.imm} << 12 = <b>${hx(val)}</b>.`;
+                            hiReg = [c.rd];
+                            desc = `<code>lui ${c.rd}, ${c.imm}</code> — <code>${c.rd}</code> = ${c.imm} << 12 = <b>${hx(val)}</b>.`;
+                            break;
+                        }
+
+                        case "call": {
+                            const target = labels[si.parsed.target];
+                            if (target == null) {
+                                pc += 4;
+                                desc = `<code>call ${si.parsed.target}</code> — etiqueta no encontrada.`;
+                                break;
                             }
+                            regs.ra = pc + 4;
+                            syncFpS0("ra");
+                            hiReg = ["ra"];
+                            pc = target;
+                            callStack.push({
+                                fn: si.parsed.target,
+                                entrySpBefore: regs.sp,
+                                allocatedSize: 0,
+                            });
+                            desc = `<code>call ${si.parsed.target}</code> — guarda dirección de retorno en <code>ra</code> = <code>${hx(regs.ra)}</code> y salta a <code>${si.parsed.target}</code>.`;
+                            break;
+                        }
+
+                        case "j": {
+                            const target = labels[si.parsed.target];
+                            if (target == null) {
+                                pc += 4;
+                                desc = `<code>j ${si.parsed.target}</code> — etiqueta no encontrada.`;
+                                break;
+                            }
+                            pc = target;
+                            desc = `<code>j ${si.parsed.target}</code> — salta incondicionalmente a <code>${hx(target)}</code>.`;
                             break;
                         }
 
                         case "jal": {
-                            const target = labels[instr.target];
+                            const c = si.concretes[0];
+                            const target = labels[c.target];
                             if (target == null) {
                                 pc += 4;
-                                desc = `<code>${instr.from?.op ?? "jal"} ${instr.target}</code> — etiqueta no encontrada.`;
+                                desc = `<code>jal ${c.rd}, ${c.target}</code> — etiqueta no encontrada.`;
                                 break;
                             }
-                            if (instr.rd !== "zero") {
-                                regs[instr.rd] = pc + 4;
-                                syncFpS0(instr.rd);
-                                hiReg = [instr.rd];
+                            if (c.rd !== "zero") {
+                                regs[c.rd] = pc + 4;
+                                syncFpS0(c.rd);
+                                hiReg = [c.rd];
                             }
                             pc = target;
-                            if (instr.from?.op === "call") {
-                                callStack.push({
-                                    fn: instr.target,
-                                    entrySpBefore: regs.sp,
-                                    allocatedSize: 0,
-                                });
-                                desc = `<code>call ${instr.target}</code> — guarda dirección de retorno en <code>ra</code> = <code>${hx(regs.ra)}</code> y salta a <code>${instr.target}</code>.`;
-                            } else if (instr.from?.op === "j") {
-                                desc = `<code>j ${instr.target}</code> — salta incondicionalmente a <code>${hx(target)}</code>.`;
-                            } else {
-                                desc = `<code>jal ${instr.rd}, ${instr.target}</code> — `
-                                     + (instr.rd !== "zero" ? `<code>${instr.rd}</code> = <code>${hx(regs[instr.rd])}</code>, ` : "")
-                                     + `PC ← <code>${hx(target)}</code>.`;
+                            desc =
+                                `<code>jal ${c.rd}, ${c.target}</code> — ` +
+                                (c.rd !== "zero"
+                                    ? `<code>${c.rd}</code> = <code>${hx(regs[c.rd])}</code>, `
+                                    : "") +
+                                `PC ← <code>${hx(target)}</code>.`;
+                            break;
+                        }
+
+                        case "ret": {
+                            const target = regs.ra & ~1;
+                            pc = target;
+                            hiReg = ["ra", "a0"];
+                            desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(target)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
+                            break;
+                        }
+
+                        case "jalr": {
+                            const c = si.concretes[0];
+                            const target = (regs[c.rs1] + c.imm) & ~1;
+                            const linkAddr = pc + 4;
+                            if (c.rd !== "zero") {
+                                regs[c.rd] = linkAddr;
+                                syncFpS0(c.rd);
+                                hiReg = [c.rd];
                             }
+                            pc = target;
+                            desc =
+                                `<code>jalr ${c.rd}, ${c.rs1}, ${c.imm}</code> — ` +
+                                (c.rd !== "zero"
+                                    ? `<code>${c.rd}</code> = <code>${hx(linkAddr)}</code>, `
+                                    : "") +
+                                `PC ← <code>${c.rs1}</code> + ${c.imm} = <code>${hx(target)}</code>.`;
                             break;
                         }
 
@@ -1436,6 +1566,7 @@
                         case "bge":
                         case "bltu":
                         case "bgeu": {
+                            const c = si.concretes[0];
                             const conds = {
                                 beq: (a, b) => a === b,
                                 bne: (a, b) => a !== b,
@@ -1444,43 +1575,19 @@
                                 bltu: (a, b) => a >>> 0 < b >>> 0,
                                 bgeu: (a, b) => a >>> 0 >= b >>> 0,
                             };
-                            const taken = conds[instr.op](
-                                regs[instr.rs1],
-                                regs[instr.rs2],
+                            const taken = conds[si.parsed.op](
+                                regs[c.rs1],
+                                regs[c.rs2],
                             );
-                            const target = labels[instr.target];
+                            const target = labels[c.target];
                             pc = taken && target != null ? target : pc + 4;
-                            desc = `<code>${instr.op} ${instr.rs1}, ${instr.rs2}, ${instr.target}</code> — ${regs[instr.rs1]} vs ${regs[instr.rs2]}: rama ${taken ? "<b>tomada</b>" : "no tomada"}.`;
-                            break;
-                        }
-
-                        case "jalr": {
-                            const target = (regs[instr.rs1] + instr.imm) & ~1;
-                            const linkAddr = pc + 4;
-                            if (instr.rd !== "zero") {
-                                regs[instr.rd] = linkAddr;
-                                syncFpS0(instr.rd);
-                                hiReg = [instr.rd];
-                            }
-                            pc = target;
-
-                            if (instr.from?.op === "ret") {
-                                hiReg = ["ra", "a0"];
-                                desc = `<code>ret</code> — retorna a <code>ra</code> = <code>${hx(target)}</code>. Valor de retorno: <code>a0</code> = <b>${regs.a0}</b>.`;
-                            } else {
-                                desc =
-                                    `<code>jalr ${instr.rd}, ${instr.rs1}, ${instr.imm}</code> — ` +
-                                    (instr.rd !== "zero"
-                                        ? `<code>${instr.rd}</code> = <code>${hx(linkAddr)}</code>, `
-                                        : "") +
-                                    `PC ← <code>${instr.rs1}</code> + ${instr.imm} = <code>${hx(target)}</code>.`;
-                            }
+                            desc = `<code>${si.parsed.op} ${c.rs1}, ${c.rs2}, ${c.target}</code> — ${regs[c.rs1]} vs ${regs[c.rs2]}: rama ${taken ? "<b>tomada</b>" : "no tomada"}.`;
                             break;
                         }
 
                         default: {
                             pc += 4;
-                            desc = `<code>${instr.raw ?? instr.op}</code>`;
+                            desc = `<code>${si.raw}</code>`;
                             break;
                         }
                     }
@@ -1495,20 +1602,20 @@
 
             // ─── Build assembly view ───────────────────────────────────────────────────
             function buildAsmView(prog) {
-                const { instrs } = assembleProgram(prog);
+                const { sourceInstrs } = assembleProgram(prog);
                 const el = document.getElementById("view-asm");
                 let html = "";
                 let lastFn = null;
 
-                for (const instr of instrs) {
-                    if (instr.fn !== lastFn) {
+                for (const si of sourceInstrs) {
+                    if (si.fn !== lastFn) {
                         if (lastFn !== null) {
                             html += `<div class="line"><span class="asm-addr"></span><span> </span></div>`;
                         }
-                        html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${instr.fn}:</span></div>`;
-                        lastFn = instr.fn;
+                        html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.fn}:</span></div>`;
+                        lastFn = si.fn;
                     }
-                    html += `<div class="line" id="al-${instr.addr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(instr.addr)}</span><span>  ${highlightInstr(instr.raw)}</span></div>`;
+                    html += `<div class="line" id="al-${si.firstAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span></div>`;
                 }
 
                 el.innerHTML = html;
@@ -1518,13 +1625,15 @@
             let DISPLAY_REGS = [];
 
             function computeDisplayRegs(prog) {
-                const { instrs } = assembleProgram(prog);
+                const { sourceInstrs } = assembleProgram(prog);
                 const used = new Set(["sp", "ra"]);
                 for (const r of Object.keys(prog.initialRegs)) used.add(r);
-                for (const instr of instrs) {
-                    for (const field of ["rd", "rs1", "rs2"]) {
-                        if (instr[field] && REG_META[instr[field]])
-                            used.add(instr[field]);
+                for (const si of sourceInstrs) {
+                    for (const c of si.concretes) {
+                        for (const field of ["rd", "rs1", "rs2"]) {
+                            if (c[field] && REG_META[c[field]])
+                                used.add(c[field]);
+                        }
                     }
                 }
                 return ALL_REGS.filter((r) => used.has(r)).map((r) => ({
@@ -1868,9 +1977,11 @@
                 }
 
                 // Validate that initial ra points outside the program's address range
-                const { instrs } = assembleProgram(prog);
+                const { sourceInstrs } = assembleProgram(prog);
                 const progStart = prog.baseAddress;
-                const progEnd = prog.baseAddress + instrs.length * 4;
+                const lastSi = sourceInstrs[sourceInstrs.length - 1];
+                const progEnd =
+                    lastSi.concretes[lastSi.concretes.length - 1].addr + 4;
                 const initRa = prog.initialRegs.ra ?? 0;
                 if (initRa >= progStart && initRa < progEnd) {
                     buildAsmView(prog);
