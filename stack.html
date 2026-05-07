@@ -387,6 +387,21 @@
         font-size: 14px;
         color: var(--text-faint);
       }
+      [data-tooltip] { cursor: default; }
+      #tooltip {
+        position: fixed;
+        background: var(--text);
+        color: var(--bg);
+        padding: 4px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        white-space: pre;
+        z-index: 9999;
+        pointer-events: none;
+        font-weight: normal;
+        font-family: var(--mono);
+        display: none;
+      }
 
       /* ── CONTROLS ── */
       .controls {
@@ -992,8 +1007,7 @@
 
       function fmtRegVal(key, val) {
         if (val == null) return RAND_REGS[key] ?? '?';
-        if (key === 'sp' || key === 'ra' || key === 'fp' || key === 'gp' || key === 'tp') return hx(val);
-        return String(val);
+        return hx(val);
       }
 
       function render(s) {
@@ -1024,9 +1038,12 @@
         const hiR = new Set(s.hiReg || []);
         document.getElementById("reg-list").innerHTML = DISPLAY_REGS.map(r => {
           const val = s.regs ? s.regs[r.key] : null;
+          const tip = val != null
+            ? `data-tooltip="sin signo: ${val >>> 0}&#10;con signo: ${val | 0}"`
+            : '';
           return `<div class="reg-row${hiR.has(r.name) ? ' hi' : ''}">
             <span class="reg-name">${r.name}</span>
-            <span class="reg-val">${fmtRegVal(r.key, val)}</span>
+            <span class="reg-val" ${tip}>${fmtRegVal(r.key, val)}</span>
             <span class="reg-desc">${r.desc}</span>
           </div>`;
         }).join('');
@@ -1090,13 +1107,16 @@
             const label = s.slotLabels && s.slotLabels.get(addr);
             const val = s.mem && s.mem.get(addr);
             const slotName = label ? `${hx(addr)}&nbsp;&nbsp;${label}` : hx(addr);
-            const slotVal = val !== undefined ? String(val) : '—';
+            const slotVal = val !== undefined ? hx(val) : '—';
+            const slotTip = val !== undefined
+              ? `data-tooltip="sin signo: ${val >>> 0}&#10;con signo: ${val | 0}"`
+              : '';
             const isHi = hiS.has(addr);
             const bg = isHi ? 'var(--orange-dim)' : color;
             const nameColor = label ? 'var(--blue)' : '';
             frameSlots += `<div class="frame-slot" id="slot-${addr.toString(16)}" style="background:${bg}">` +
               `<span class="slot-name"${nameColor ? ` style="color:${nameColor}"` : ''}>${slotName}</span>` +
-              `<span class="slot-val">${slotVal}</span></div>`;
+              `<span class="slot-val" ${slotTip}>${slotVal}</span></div>`;
           }
 
           html += `<div class="frame" id="fr-active-${fi}" data-fn="${frame.fn}">${frameSlots}</div>`;
@@ -1292,6 +1312,31 @@
       `;
 
       loadProgram(PROGRAMS[0]);
+      // ─── Tooltip ──────────────────────────────────────────────────────────────
+      const tt = document.createElement('div');
+      tt.id = 'tooltip';
+      document.body.appendChild(tt);
+
+      document.addEventListener('mouseover', e => {
+        const el = e.target.closest('[data-tooltip]');
+        if (!el) { tt.style.display = 'none'; return; }
+        tt.textContent = el.dataset.tooltip;
+        tt.style.display = 'block';
+      });
+      document.addEventListener('mouseout', e => {
+        if (!e.target.closest('[data-tooltip]')) return;
+        tt.style.display = 'none';
+      });
+      document.addEventListener('mousemove', e => {
+        if (tt.style.display === 'none') return;
+        const gap = 12;
+        let x = e.clientX + gap;
+        let y = e.clientY + gap;
+        if (x + tt.offsetWidth > window.innerWidth)  x = e.clientX - tt.offsetWidth - gap;
+        if (y + tt.offsetHeight > window.innerHeight) y = e.clientY - tt.offsetHeight - gap;
+        tt.style.left = x + 'px';
+        tt.style.top  = y + 'px';
+      });
     </script>
   </body>
 </html>
