@@ -488,7 +488,7 @@ function assembleProgram(prog: Program): AssemblyResult | ParseError {
             const concretes: ConcreteInstr[] = [];
             for (const spec of concreteSpecs) {
                 addrToSourceIdx.set(addr, sourceInstrs.length);
-                concretes.push({ fn, addr, ...spec } as ConcreteInstr);
+                concretes.push({ addr, ...spec });
                 addr += 4;
             }
             sourceInstrs.push({
