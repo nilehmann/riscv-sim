@@ -35,7 +35,7 @@ export type ConcreteSpec =
 
 export type ConcreteInstr = ConcreteSpec & { fn: string; addr: number }
 
-export type ExpandedInstr = ParsedInstr & { instrs?: ConcreteSpec[] }
+export type ExpandedInstr = { instrs: ConcreteSpec[], isPseudo: boolean }
 
 export interface SourceInstr {
     fn: string
