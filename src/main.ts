@@ -1,17 +1,18 @@
 import type {
     Program,
     ParsedInstr,
+    AssembledInstrs,
     ConcreteSpec,
     ConcreteInstr,
-    ExpandedInstr,
     SourceInstr,
     AssemblyResult,
+    RelocationEntry,
     Step,
     DisplayReg,
     Token,
     TokenKind,
 } from "./types";
-import { ParseError } from "./types";
+import { ParseError, LinkError } from "./types";
 
 // ─── Programs ──────────────────────────────────────────────────────────────
 // To add a new program: append an entry to this array.
@@ -337,7 +338,11 @@ function parseInstr(raw: string): ParsedInstr | ParseError {
 }
 
 // ─── Pseudo-instruction expander ─────────────────────────────────────────
-function expandPseudo(parsed: ParsedInstr): ExpandedInstr {
+function assembleInstr(
+    parsed: ParsedInstr,
+    addr: number,
+    relocations: RelocationEntry[],
+): AssembledInstrs {
     const p = parsed;
     switch (p.op) {
         case "ret":
@@ -356,20 +361,38 @@ function expandPseudo(parsed: ParsedInstr): ExpandedInstr {
                 isPseudo: false,
             };
         case "call": {
+            relocations.push({
+                instrAddr: addr,
+                symbol: p.target,
+                type: "R_RISCV_CALL",
+            });
             return {
-                instrs: [{ op: "jal", rd: "ra", target: p.target }],
+                instrs: [
+                    { op: "auipc", rd: "ra", imm: 0 },
+                    { op: "jalr", rd: "ra", rs1: "ra", imm: 0 },
+                ],
                 isPseudo: true,
             };
         }
         case "j": {
+            relocations.push({
+                instrAddr: addr,
+                symbol: p.target,
+                type: "R_RISCV_JAL",
+            });
             return {
-                instrs: [{ op: "jal", rd: "zero", target: p.target }],
+                instrs: [{ op: "jal", rd: "zero", target: 0 }],
                 isPseudo: true,
             };
         }
         case "jal": {
+            relocations.push({
+                instrAddr: addr,
+                symbol: p.target,
+                type: "R_RISCV_JAL",
+            });
             return {
-                instrs: [{ op: "jal", rd: p.rd, target: p.target }],
+                instrs: [{ op: "jal", rd: p.rd, target: 0 }],
                 isPseudo: false,
             };
         }
@@ -457,10 +480,13 @@ function expandPseudo(parsed: ParsedInstr): ExpandedInstr {
         case "bge":
         case "bltu":
         case "bgeu":
+            relocations.push({
+                instrAddr: addr,
+                symbol: p.target,
+                type: "R_RISCV_BRANCH",
+            });
             return {
-                instrs: [
-                    { op: p.op, rs1: p.rs1, rs2: p.rs2, target: p.target },
-                ],
+                instrs: [{ op: p.op, rs1: p.rs1, rs2: p.rs2, target: 0 }],
                 isPseudo: false,
             };
         default:
@@ -474,6 +500,7 @@ function assembleProgram(prog: Program): AssemblyResult | ParseError {
     const sourceInstrs: SourceInstr[] = [];
     const addrToSourceIdx = new Map<number, number>();
     const labels: Record<string, number> = {};
+    const relocations: RelocationEntry[] = [];
     let addr = prog.baseAddress;
 
     for (const [fn, lines] of Object.entries(prog.functions)) {
@@ -482,8 +509,8 @@ function assembleProgram(prog: Program): AssemblyResult | ParseError {
             const parsed = parseInstr(line);
             if (parsed instanceof ParseError)
                 return new ParseError(parsed.raw, fn);
-            const expanded = expandPseudo(parsed);
-            const concreteSpecs: ConcreteSpec[] = expanded.instrs;
+            const assembled = assembleInstr(parsed, addr, relocations);
+            const concreteSpecs: ConcreteSpec[] = assembled.instrs;
             const firstAddr = addr;
             const concretes: ConcreteInstr[] = [];
             for (const spec of concreteSpecs) {
@@ -497,11 +524,50 @@ function assembleProgram(prog: Program): AssemblyResult | ParseError {
                 parsed,
                 concretes,
                 firstAddr,
-                isPseudo: expanded.isPseudo,
+                isPseudo: assembled.isPseudo,
             });
         }
     }
-    return { sourceInstrs, addrToSourceIdx, labels };
+    return { sourceInstrs, addrToSourceIdx, labels, relocations };
+}
+
+function linkProgram(result: AssemblyResult): LinkError | AssemblyResult {
+    const { relocations, labels } = result;
+    const addrToInstr = new Map<number, ConcreteInstr>();
+    for (const si of result.sourceInstrs) {
+        for (const ci of si.concretes) {
+            addrToInstr.set(ci.addr, ci);
+        }
+    }
+
+    for (const rel of relocations) {
+        const targetAddr = labels[rel.symbol];
+        if (targetAddr == null) return new LinkError(rel.symbol);
+
+        switch (rel.type) {
+            case "R_RISCV_JAL": {
+                const ci = addrToInstr.get(rel.instrAddr)! as any;
+                ci.target = targetAddr;
+                break;
+            }
+            case "R_RISCV_BRANCH": {
+                const ci = addrToInstr.get(rel.instrAddr)! as any;
+                ci.target = targetAddr;
+                break;
+            }
+            case "R_RISCV_CALL": {
+                const auipc = addrToInstr.get(rel.instrAddr)! as any;
+                const jalr = addrToInstr.get(rel.instrAddr + 4)! as any;
+                const offset = targetAddr - rel.instrAddr;
+                const lo12 = ((offset & 0xfff) << 20) >> 20;
+                const hi20 = (offset - lo12) >> 12;
+                auipc.imm = hi20;
+                jalr.imm = lo12;
+                break;
+            }
+        }
+    }
+    return result;
 }
 
 // ─── Syntax highlighter ───────────────────────────────────────────────────
@@ -729,316 +795,182 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
         if (siIdx == null) break;
         const si = sourceInstrs[siIdx];
 
-        const prev = { ...regs };
         const instrAddr = si.firstAddr;
         let hiReg: string[] = [],
             hiSlots: number[] = [];
 
-        switch (si.parsed.op) {
-            case "addi":
-            case "andi":
-            case "ori":
-            case "xori": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    rs1: string;
-                    imm: number;
-                };
-                const ops: Record<string, (a: number, b: number) => number> = {
-                    addi: (a, b) => a + b,
-                    andi: (a, b) => a & b,
-                    ori: (a, b) => a | b,
-                    xori: (a, b) => a ^ b,
-                };
-                const val = ops[si.parsed.op](regs[c.rs1], c.imm);
-                regs[c.rd] = val;
-                syncFpS0(c.rd);
-                pc += 4;
-                hiReg = [c.rd];
+        const immOps: Record<string, (a: number, b: number) => number> = {
+            addi: (a, b) => a + b,
+            andi: (a, b) => a & b,
+            ori: (a, b) => a | b,
+            xori: (a, b) => a ^ b,
+            slli: (a, b) => a << b,
+            srli: (a, b) => a >>> b,
+            srai: (a, b) => a >> b,
+        };
+        const regOps: Record<string, (a: number, b: number) => number> = {
+            add: (a, b) => a + b,
+            sub: (a, b) => a - b,
+            mul: (a, b) => a * b,
+            div: (a, b) => (b === 0 ? 0 : Math.trunc(a / b)),
+            rem: (a, b) => (b === 0 ? a : a % b),
+            and: (a, b) => a & b,
+            or: (a, b) => a | b,
+            xor: (a, b) => a ^ b,
+            sll: (a, b) => a << b,
+            srl: (a, b) => a >>> b,
+            sra: (a, b) => a >> b,
+        };
+        const branchConds: Record<string, (a: number, b: number) => boolean> = {
+            beq: (a, b) => a === b,
+            bne: (a, b) => a !== b,
+            blt: (a, b) => a < b,
+            bge: (a, b) => a >= b,
+            bltu: (a, b) => a >>> 0 < b >>> 0,
+            bgeu: (a, b) => a >>> 0 >= b >>> 0,
+        };
 
-                if (c.rd === "sp") {
-                    let top = null;
-                    for (let i = callStack.length - 1; i >= 0; i--) {
-                        if (callStack[i].fn === si.fn) {
-                            top = callStack[i];
-                            break;
+        for (const ci of si.concretes) {
+            switch (ci.op) {
+                case "addi":
+                case "andi":
+                case "ori":
+                case "xori":
+                case "slli":
+                case "srli":
+                case "srai": {
+                    const val = immOps[ci.op](regs[ci.rs1], ci.imm);
+                    regs[ci.rd] = val;
+                    syncFpS0(ci.rd);
+                    pc += 4;
+                    hiReg.push(ci.rd);
+                    if (ci.rd === "sp") {
+                        let top = null;
+                        for (let i = callStack.length - 1; i >= 0; i--) {
+                            if (callStack[i].fn === si.fn) {
+                                top = callStack[i];
+                                break;
+                            }
                         }
+                        if (!top) top = callStack[callStack.length - 1];
+                        top.allocatedSize = top.entrySpBefore - val;
                     }
-                    if (!top) top = callStack[callStack.length - 1];
-                    top.allocatedSize = top.entrySpBefore - val;
+                    break;
                 }
-                break;
-            }
 
-            case "mv": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    rs1: string;
-                };
-                const val = regs[c.rs1];
-                regs[c.rd] = val;
-                syncFpS0(c.rd);
-                pc += 4;
-                hiReg = [c.rd];
-                break;
-            }
+                case "add":
+                case "sub":
+                case "mul":
+                case "div":
+                case "rem":
+                case "and":
+                case "or":
+                case "xor":
+                case "sll":
+                case "srl":
+                case "sra": {
+                    const val = regOps[ci.op](regs[ci.rs1], regs[ci.rs2]);
+                    regs[ci.rd] = val;
+                    syncFpS0(ci.rd);
+                    pc += 4;
+                    hiReg.push(ci.rd);
+                    break;
+                }
 
-            case "nop": {
-                pc += 4;
-                break;
-            }
+                case "lui": {
+                    const val = ci.imm << 12;
+                    regs[ci.rd] = val;
+                    syncFpS0(ci.rd);
+                    pc += 4;
+                    hiReg.push(ci.rd);
+                    break;
+                }
 
-            case "neg": {
-                const pn = si.parsed as Extract<
-                    ParsedInstr,
-                    { op: "mv" | "neg" }
-                >;
-                const val = -prev[pn.rs1]!;
-                regs[pn.rd] = val;
-                syncFpS0(pn.rd);
-                pc += 4;
-                hiReg = [pn.rd];
-                break;
-            }
+                case "auipc": {
+                    regs[ci.rd] = ci.addr + (ci.imm << 12);
+                    syncFpS0(ci.rd);
+                    pc += 4;
+                    hiReg.push(ci.rd);
+                    break;
+                }
 
-            case "slli":
-            case "srli":
-            case "srai": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    rs1: string;
-                    imm: number;
-                };
-                const ops: Record<string, (a: number, b: number) => number> = {
-                    slli: (a, b) => a << b,
-                    srli: (a, b) => a >>> b,
-                    srai: (a, b) => a >> b,
-                };
-                const val = ops[si.parsed.op](regs[c.rs1], c.imm);
-                regs[c.rd] = val;
-                syncFpS0(c.rd);
-                pc += 4;
-                hiReg = [c.rd];
-                break;
-            }
-
-            case "add":
-            case "sub":
-            case "mul":
-            case "div":
-            case "rem":
-            case "and":
-            case "or":
-            case "xor":
-            case "sll":
-            case "srl":
-            case "sra": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    rs1: string;
-                    rs2: string;
-                };
-                const ops: Record<string, (a: number, b: number) => number> = {
-                    add: (a, b) => a + b,
-                    sub: (a, b) => a - b,
-                    mul: (a, b) => a * b,
-                    div: (a, b) => (b === 0 ? 0 : Math.trunc(a / b)),
-                    rem: (a, b) => (b === 0 ? a : a % b),
-                    and: (a, b) => a & b,
-                    or: (a, b) => a | b,
-                    xor: (a, b) => a ^ b,
-                    sll: (a, b) => a << b,
-                    srl: (a, b) => a >>> b,
-                    sra: (a, b) => a >> b,
-                };
-                const val = ops[si.parsed.op](regs[c.rs1], regs[c.rs2]);
-                regs[c.rd] = val;
-                syncFpS0(c.rd);
-                pc += 4;
-                hiReg = [c.rd];
-                break;
-            }
-
-            case "sw":
-            case "sb":
-            case "sh": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rs2: string;
-                    offset: number;
-                    rs1: string;
-                };
-                const addr = regs[c.rs1] + c.offset;
-                mem.set(addr, regs[c.rs2]);
-                slotLabels.set(addr, c.rs2);
-                pc += 4;
-                hiSlots = [addr];
-                break;
-            }
-
-            case "lw":
-            case "lb":
-            case "lh":
-            case "lbu":
-            case "lhu": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    offset: number;
-                    rs1: string;
-                };
-                const addr = regs[c.rs1] + c.offset;
-                const val = mem.get(addr) ?? 0;
-                regs[c.rd] = val;
-                syncFpS0(c.rd);
-                pc += 4;
-                hiReg = [c.rd];
-                hiSlots = [addr];
-                break;
-            }
-
-            case "li": {
-                for (const c of si.concretes) {
-                    if (c.op === "lui") {
-                        regs[c.rd] = c.imm << 12;
-                        syncFpS0(c.rd);
-                    } else {
-                        const ca = c as ConcreteInstr & {
-                            rd: string;
-                            rs1: string;
-                            imm: number;
-                        };
-                        regs[ca.rd] = regs[ca.rs1] + ca.imm;
-                        syncFpS0(ca.rd);
+                case "jal": {
+                    if (ci.rd !== "zero") {
+                        regs[ci.rd] = pc + 4;
+                        syncFpS0(ci.rd);
+                        hiReg.push(ci.rd);
                     }
-                    pc += 4;
+                    pc = ci.target;
+                    break;
                 }
-                hiReg = [
-                    (si.parsed as Extract<ParsedInstr, { op: "li" | "lui" }>)
-                        .rd,
-                ];
-                break;
-            }
 
-            case "lui": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    imm: number;
-                };
-                const val = c.imm << 12;
-                regs[c.rd] = val;
-                syncFpS0(c.rd);
-                pc += 4;
-                hiReg = [c.rd];
-                break;
-            }
+                case "jalr": {
+                    const jumpTarget = (regs[ci.rs1] + ci.imm) & ~1;
+                    if (si.parsed.op === "call") {
+                        callStack.push({
+                            fn: (si.parsed as any).target,
+                            entrySpBefore: regs.sp,
+                            allocatedSize: 0,
+                        });
+                    }
+                    if (ci.rd !== "zero") {
+                        regs[ci.rd] = pc + 4;
+                        syncFpS0(ci.rd);
+                        hiReg.push(ci.rd);
+                    }
+                    pc = jumpTarget;
+                    break;
+                }
 
-            case "call": {
-                const pc_call = si.parsed as Extract<
-                    ParsedInstr,
-                    { op: "call" | "j" }
-                >;
-                const target = labels[pc_call.target];
-                if (target == null) {
+                case "ret": {
+                    pc = regs.ra & ~1;
+                    hiReg.push("ra", "a0");
+                    break;
+                }
+
+                case "sw":
+                case "sh":
+                case "sb": {
+                    const addr = regs[ci.rs1] + ci.offset;
+                    mem.set(addr, regs[ci.rs2]);
+                    slotLabels.set(addr, ci.rs2);
+                    pc += 4;
+                    hiSlots.push(addr);
+                    break;
+                }
+
+                case "lw":
+                case "lh":
+                case "lb":
+                case "lhu":
+                case "lbu": {
+                    const addr = regs[ci.rs1] + ci.offset;
+                    regs[ci.rd] = mem.get(addr) ?? 0;
+                    syncFpS0(ci.rd);
+                    pc += 4;
+                    hiReg.push(ci.rd);
+                    hiSlots.push(addr);
+                    break;
+                }
+
+                case "beq":
+                case "bne":
+                case "blt":
+                case "bge":
+                case "bltu":
+                case "bgeu": {
+                    const taken = branchConds[ci.op](
+                        regs[ci.rs1],
+                        regs[ci.rs2],
+                    );
+                    pc = taken ? ci.target : pc + 4;
+                    break;
+                }
+
+                default: {
                     pc += 4;
                     break;
                 }
-                regs.ra = pc + 4;
-                syncFpS0("ra");
-                hiReg = ["ra"];
-                pc = target;
-                callStack.push({
-                    fn: pc_call.target,
-                    entrySpBefore: regs.sp,
-                    allocatedSize: 0,
-                });
-                break;
-            }
-
-            case "j": {
-                const pj = si.parsed as Extract<
-                    ParsedInstr,
-                    { op: "call" | "j" }
-                >;
-                const targetJ = labels[pj.target];
-                if (targetJ == null) {
-                    pc += 4;
-                    break;
-                }
-                pc = targetJ;
-                break;
-            }
-
-            case "jal": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    target: string;
-                };
-                const target = labels[c.target];
-                if (target == null) {
-                    pc += 4;
-                    break;
-                }
-                if (c.rd !== "zero") {
-                    regs[c.rd] = pc + 4;
-                    syncFpS0(c.rd);
-                    hiReg = [c.rd];
-                }
-                pc = target;
-                break;
-            }
-
-            case "ret": {
-                const target = regs.ra & ~1;
-                pc = target;
-                hiReg = ["ra", "a0"];
-                break;
-            }
-
-            case "jalr": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rd: string;
-                    rs1: string;
-                    imm: number;
-                };
-                const target = (regs[c.rs1] + c.imm) & ~1;
-                const linkAddr = pc + 4;
-                if (c.rd !== "zero") {
-                    regs[c.rd] = linkAddr;
-                    syncFpS0(c.rd);
-                    hiReg = [c.rd];
-                }
-                pc = target;
-                break;
-            }
-
-            case "beq":
-            case "bne":
-            case "blt":
-            case "bge":
-            case "bltu":
-            case "bgeu": {
-                const c = si.concretes[0] as ConcreteInstr & {
-                    rs1: string;
-                    rs2: string;
-                    target: string;
-                };
-                const conds: Record<string, (a: number, b: number) => boolean> =
-                    {
-                        beq: (a, b) => a === b,
-                        bne: (a, b) => a !== b,
-                        blt: (a, b) => a < b,
-                        bge: (a, b) => a >= b,
-                        bltu: (a, b) => a >>> 0 < b >>> 0,
-                        bgeu: (a, b) => a >>> 0 >= b >>> 0,
-                    };
-                const taken = conds[si.parsed.op](regs[c.rs1], regs[c.rs2]);
-                const target = labels[c.target];
-                pc = taken && target != null ? target : pc + 4;
-                break;
-            }
-
-            default: {
-                pc += 4;
-                break;
             }
         }
 
@@ -1051,7 +983,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
 // ─── Concrete instruction serializer ──────────────────────────────────────
 function fmtConcrete(c: ConcreteInstr): string {
     if (c.op === "jalr") return `jalr ${c.rd}, ${c.rs1}, ${c.imm}`;
-    if (c.op === "jal") return `jal ${c.rd}, ${c.target}`;
+    if (c.op === "jal") return `jal ${c.rd}, ${hx(c.target)}`;
     if (c.op === "lui" || c.op === "auipc") return `${c.op} ${c.rd}, ${c.imm}`;
     if (
         (
@@ -1107,9 +1039,9 @@ function fmtConcrete(c: ConcreteInstr): string {
         const ci = c as ConcreteInstr & {
             rs1: string;
             rs2: string;
-            target: string;
+            target: number;
         };
-        return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${ci.target}`;
+        return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${hx(ci.target)}`;
     }
     return c.op;
 }
@@ -1497,6 +1429,13 @@ function loadProgram(prog: Program): void {
         showConfigError(
             `Instrucción desconocida: <code>${assembled.raw}</code> en función <code>${assembled.fn}</code>.`,
         );
+        return;
+    }
+
+    const linked = linkProgram(assembled);
+    if (linked instanceof LinkError) {
+        buildAsmView(assembled);
+        showConfigError(`Símbolo no resuelto: <code>${linked.symbol}</code>.`);
         return;
     }
 

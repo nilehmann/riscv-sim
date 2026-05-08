@@ -52,12 +52,24 @@ export type ParsedInstr =
           target: string;
       };
 
+export type RelocationType = "R_RISCV_JAL" | "R_RISCV_BRANCH" | "R_RISCV_CALL";
+
+export interface RelocationEntry {
+    instrAddr: number;
+    symbol: string;
+    type: RelocationType;
+}
+
+export class LinkError {
+    readonly kind = "LinkError" as const;
+    constructor(public readonly symbol: string) {}
+}
+
 export type ConcreteSpec =
     | { op: "ret" }
     | { op: "jalr"; rd: string; rs1: string; imm: number }
     | { op: "lui" | "auipc"; rd: string; imm: number }
-    | { op: "jal"; rd: string; target: string }
-    | { op: "call" | "j"; target: string }
+    | { op: "jal"; rd: string; target: number } // 0 pre-link, resolved address post-link
     | {
           op: "addi" | "slli" | "srli" | "srai" | "andi" | "ori" | "xori";
           rd: string;
@@ -92,12 +104,16 @@ export type ConcreteSpec =
           op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu";
           rs1: string;
           rs2: string;
-          target: string;
+          target: number; // 0 pre-link, resolved address post-link
       };
 
 export type ConcreteInstr = ConcreteSpec & { addr: number };
 
-export type ExpandedInstr = { instrs: ConcreteSpec[]; isPseudo: boolean };
+export type AssembledInstrs = {
+    instrs: ConcreteSpec[];
+    /// Whether the list of instructions came from a pseudo-instruction.
+    isPseudo: boolean;
+};
 
 export interface SourceInstr {
     fn: string;
@@ -112,6 +128,7 @@ export interface AssemblyResult {
     sourceInstrs: SourceInstr[];
     addrToSourceIdx: Map<number, number>;
     labels: Record<string, number>;
+    relocations: RelocationEntry[];
 }
 
 export interface FrameInfo {
