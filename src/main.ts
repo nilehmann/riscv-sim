@@ -6,7 +6,7 @@ import type {
     Token,
     TokenKind,
 } from "./types";
-import { ParseError, RangeError } from "./types";
+import { ParseError, RangeError, OverlapError, ConfigError } from "./types";
 import { hx, assembleProgram, fmtConcreteRel } from "./assembler";
 import { ALL_REGS, REG_META, REG_SET, simulate } from "./simulator";
 import { PROGRAMS } from "./programs";
@@ -740,6 +740,17 @@ function loadProgram(prog: Program): void {
     if (assembled instanceof RangeError) {
         showConfigError(
             `Salto fuera de rango: <code>${assembled.raw}</code> en etiqueta <code>${assembled.label}</code>.`,
+        );
+        return;
+    }
+    if (assembled instanceof ConfigError) {
+        showConfigError(assembled.message);
+        return;
+    }
+    if (assembled instanceof OverlapError) {
+        showConfigError(
+            `El código termina en <code>${hx(assembled.codeEnd)}</code>, que supera la base del stack <code>${hx(assembled.stackBase)}</code>.<br><br>` +
+                `<span style="color:var(--text-dim)">Reduce <code>baseAddress</code> o ajusta <code>stackBase</code>.</span>`,
         );
         return;
     }

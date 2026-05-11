@@ -5,11 +5,11 @@ import type {
   AssemblyResult,
   SourceInstr,
 } from "./types";
-import { ParseError, RangeError } from "./types";
+import { ParseError, RangeError, OverlapError, ConfigError } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 export const hx = (v: number): string =>
-  "0x" + (v >>> 0).toString(16).toUpperCase().padStart(4, "0");
+  "0x" + (v >>> 0).toString(16).toUpperCase().padStart(8, "0");
 
 // ─── Instruction parser ───────────────────────────────────────────────────
 export function parseInstr(raw: string): ParsedInstr | ParseError {
@@ -293,7 +293,20 @@ function parseProgram(prog: Program): ParsedLine[] | ParseError {
 
 export function assembleProgram(
   prog: Program,
-): AssemblyResult | ParseError | RangeError {
+): AssemblyResult | ParseError | RangeError | OverlapError | ConfigError {
+  // ── Range validation: all numeric config values must fit in 32 bits ───────
+  const u32 = (v: number) => (v >>> 0) === v;
+  if (!u32(prog.baseAddress))
+    return new ConfigError(`baseAddress ${hx(prog.baseAddress)} no cabe en 32 bits.`);
+  if (prog.stackBase != null && !u32(prog.stackBase))
+    return new ConfigError(`stackBase ${hx(prog.stackBase)} no cabe en 32 bits.`);
+  for (const [reg, val] of Object.entries(prog.initialRegs)) {
+    if (!u32(val))
+      return new ConfigError(
+        `Registro inicial ${reg} = 0x${val.toString(16).toUpperCase()} no cabe en 32 bits.`,
+      );
+  }
+
   // ── Pass 1: parse all instructions and assign label addresses ──────────
   // Use worst-case sizes so label addresses are upper bounds.
   const parsedLines = parseProgram(prog);
@@ -327,6 +340,20 @@ export function assembleProgram(
       addr += 4;
     }
     sourceInstrs.push({ label, raw, parsed, concretes, firstAddr });
+  }
+
+  // Overlap check: code section must not reach into the stack region.
+  const stackBase = prog.stackBase ?? 0xc0000000;
+  const codeEnd = prog.baseAddress + addr;
+  if (codeEnd > stackBase) return new OverlapError(codeEnd, stackBase);
+
+  // sp consistency check: initial sp must be ≤ stackBase, otherwise [sp, stackBase) is empty.
+  if (prog.osMode !== false) {
+    const initSp = prog.initialRegs.sp ?? 0;
+    if (initSp > stackBase)
+      return new ConfigError(
+        `sp inicial (${hx(initSp)}) es mayor que stackBase (${hx(stackBase)}). El rango de stack válido [sp, stackBase) estaría vacío.`,
+      );
   }
 
   // Build real section-relative label addresses from actual pass-2 positions.

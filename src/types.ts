@@ -4,6 +4,10 @@ export interface Program {
   entryPoint: string;
   initialRegs: Record<string, number>;
   baseAddress: number;
+  /** Top of the stack (stack grows down from here). Default: 0xC0000000 */
+  stackBase?: number;
+  /** When true, memory accesses outside [sp, stackBase) segfault. Default: true */
+  osMode?: boolean;
   assembly: string;
 }
 
@@ -52,6 +56,19 @@ export type ParsedInstr =
       rs2: string;
       target: string;
     };
+
+export class ConfigError {
+  readonly kind = "ConfigError" as const;
+  constructor(public readonly message: string) {}
+}
+
+export class OverlapError {
+  readonly kind = "OverlapError" as const;
+  constructor(
+    public readonly codeEnd: number,
+    public readonly stackBase: number,
+  ) {}
+}
 
 export class RangeError {
   readonly kind = "RangeError" as const;
@@ -131,6 +148,7 @@ export interface Step {
   hiSlots: number[];
   slotLabels: Map<number, string>;
   callStack: FrameInfo[];
+  fault?: { type: "segfault"; addr: number };
 }
 
 export interface SimulateResult {

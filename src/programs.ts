@@ -5,7 +5,7 @@ export const PROGRAMS: Program[] = [
     name: "baz -> foo",
     cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
     entryPoint: "baz",
-    initialRegs: { sp: 0x1000, ra: 0x8050, a0: 3, s0: 0x54 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x8050, a0: 3, s0: 0x54 },
     baseAddress: 0x8000,
     assembly: `\
 foo:
@@ -28,7 +28,7 @@ baz:
   {
     name: "bar -> foo -> baz",
     entryPoint: "bar",
-    initialRegs: { sp: 0x1000, ra: 0x9000, a0: 3, s0: 0x54 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 3, s0: 0x54 },
     baseAddress: 0x8000,
     assembly: `\
 baz:
@@ -61,7 +61,7 @@ bar:
   {
     name: "load big immediate",
     entryPoint: "foo",
-    initialRegs: { sp: 0x1000, ra: 0x9000 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
     baseAddress: 0x8000,
     assembly: `\
 foo:
@@ -71,7 +71,7 @@ foo:
   {
     name: "forward call (bar → baz)",
     entryPoint: "bar",
-    initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 5 },
     baseAddress: 0x8000,
     assembly: `\
 bar:
@@ -89,7 +89,7 @@ baz:
   {
     name: "función hoja simple",
     entryPoint: "foo",
-    initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 5 },
     baseAddress: 0x8000,
     cCode: `int foo(int x) {\n  return x + 1;\n}`,
     assembly: `\
@@ -100,7 +100,7 @@ foo:
   {
     name: "hola",
     entryPoint: "foo",
-    initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },
     baseAddress: 0x8000,
     cCode: `\
     int foo(int i) {

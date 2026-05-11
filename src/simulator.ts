@@ -110,16 +110,40 @@ export const REG_META = {
 };
 
 // ─── Machine ──────────────────────────────────────────────────────────────
+
+// Deterministic garbage for uninitialized stack slots — looks like random
+// memory but is reproducible across runs, useful for teaching.
+function garbageValue(addr: number): number {
+    let h = Math.imul(addr ^ 0x45d9f3b, 0x9e3779b9);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0x5c4d3215);
+    return (h ^ (h >>> 16)) | 0;
+}
+
 export class Machine {
     regs: Record<string, number>;
     mem: Map<number, number>;
+    readonly stackBase: number;
+    readonly osMode: boolean;
 
-    constructor(initialRegs: Record<string, number>) {
+    constructor(
+        initialRegs: Record<string, number>,
+        stackBase: number,
+        osMode: boolean,
+    ) {
         this.regs = {};
         for (const r of ALL_REGS) this.regs[r] = 0;
         for (const [k, v] of Object.entries(initialRegs)) this.regs[k] = v;
         this.regs.fp = this.regs.s0; // s0 and fp alias x8
         this.mem = new Map();
+        this.stackBase = stackBase;
+        this.osMode = osMode;
+    }
+
+    /** Returns true if addr is a valid (non-faulting) memory address. */
+    checkAccess(addr: number): boolean {
+        if (!this.osMode) return true;
+        return addr >= this.regs.sp && addr < this.stackBase;
     }
 
     writeReg(name: string, value: number): void {
@@ -134,7 +158,14 @@ export class Machine {
     }
 
     readMem(addr: number): number {
-        return this.mem.get(addr) ?? 0;
+        if (this.mem.has(addr)) return this.mem.get(addr)!;
+        if (this.osMode) {
+            // Uninitialized stack slot: materialize garbage deterministically.
+            const v = garbageValue(addr);
+            this.mem.set(addr, v);
+            return v;
+        }
+        return 0;
     }
 
     snapshot(): { regs: Record<string, number>; mem: Map<number, number> } {
@@ -146,7 +177,9 @@ export class Machine {
 export function simulate(prog: Program, assembled: AssemblyResult): SimulateResult {
     const { sourceInstrs, addrToSourceIdx, labels } = assembled;
 
-    const machine = new Machine(prog.initialRegs);
+    const stackBase = prog.stackBase ?? 0xc0000000;
+    const osMode = prog.osMode !== false;
+    const machine = new Machine(prog.initialRegs, stackBase, osMode);
     const slotLabels = new Map<number, string>(); // addr → saved register name
 
     let pc = labels[prog.entryPoint];
@@ -182,6 +215,7 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
         hiSlots: number[],
         instrAddr: number | null,
         nextAddr: number | null,
+        fault?: { type: "segfault"; addr: number },
     ): Step {
         return {
             aHl: instrAddr != null ? [instrAddr] : [],
@@ -192,7 +226,17 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
             hiSlots: hiSlots || [],
             slotLabels: s.slotLabels,
             callStack: s.callStack,
+            fault,
         };
+    }
+
+    function segfault(faultAddr: number, instrAddr: number): void {
+        steps.push(
+            makeStep(snap(), [], [], instrAddr, null, {
+                type: "segfault",
+                addr: faultAddr,
+            }),
+        );
     }
 
     // Emit initial step (state before first instruction)
@@ -332,6 +376,10 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
                 case "sh":
                 case "sb": {
                     const addr = machine.regs[ci.rs1] + ci.offset;
+                    if (!machine.checkAccess(addr)) {
+                        segfault(addr, ciAddr);
+                        return { steps, sourceToConcrete };
+                    }
                     machine.writeMem(addr, machine.regs[ci.rs2]);
                     slotLabels.set(addr, ci.rs2);
                     pc += 4;
@@ -345,6 +393,10 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
                 case "lhu":
                 case "lbu": {
                     const addr = machine.regs[ci.rs1] + ci.offset;
+                    if (!machine.checkAccess(addr)) {
+                        segfault(addr, ciAddr);
+                        return { steps, sourceToConcrete };
+                    }
                     machine.writeReg(ci.rd, machine.readMem(addr));
                     pc += 4;
                     hiReg.push(ci.rd);
