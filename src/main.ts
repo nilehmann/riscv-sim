@@ -28,37 +28,93 @@ const OFFSET_MAX = 64; // only show sp±N labels within this range
 // ─── Syntax highlighter ───────────────────────────────────────────────────
 const JUMP_OPS = new Set(["jal", "beq", "bne", "blt", "bge", "bltu", "bgeu"]);
 
-function highlightInstr(raw: string): string {
+interface HlCtx { labels: Record<string, number>; addr: number; }
+
+function sp(cls: string, text: string): HTMLSpanElement {
+    const el = document.createElement("span");
+    el.className = cls;
+    el.textContent = text;
+    return el;
+}
+
+function highlightInstr(raw: string, ctx: HlCtx): HTMLElement {
     const s = raw.trim();
-    const sp = s.indexOf(" ");
-    const op = sp === -1 ? s : s.slice(0, sp);
-    const rest = sp === -1 ? "" : s.slice(sp + 1);
+    const spIdx = s.indexOf(" ");
+    const op = spIdx === -1 ? s : s.slice(0, spIdx);
+    const rest = spIdx === -1 ? "" : s.slice(spIdx + 1);
     const isJump = JUMP_OPS.has(op);
 
-    let html = `<span class="kw">${op}</span>`;
-    if (!rest) return html;
+    const wrapper = document.createElement("span");
+    wrapper.append(sp("kw", op));
+    if (!rest) return wrapper;
 
-    const tokenHtml = (tok: string, isLast: boolean): string => {
+    const makeToken = (tok: string, isLast: boolean): (string | HTMLElement)[] => {
         const t = tok.trim();
         const memM = t.match(/^(-?\d+)\((\w+)\)$/);
-        if (memM)
-            return `<span class="imm">${memM[1]}</span>(<span class="reg">${memM[2]}</span>)`;
-        if (REG_SET.has(t)) return `<span class="reg">${t}</span>`;
+        if (memM) return [sp("imm", memM[1]!), "(", sp("reg", memM[2]!), ")"];
+        if (REG_SET.has(t)) return [sp("reg", t)];
         if (/^[+-]?\d+$/.test(t)) {
-            return isJump && isLast
-                ? `<span class="fn">${t}</span>`
-                : `<span class="imm">${t}</span>`;
+            if (isJump && isLast) {
+                const targetAddr = ctx.addr + parseInt(t, 10);
+                const el = sp("fn", t);
+                el.dataset["targetAddr"] = String(targetAddr);
+                el.dataset["tooltip"] = `addr: ${hx(targetAddr)}`;
+                return [el];
+            }
+            return [sp("imm", t)];
         }
-        return `<span class="fn">${t}</span>`;
+        // label name
+        if (t in ctx.labels) {
+            const el = sp("fn", t);
+            el.dataset["targetAddr"] = String(ctx.labels[t]);
+            el.dataset["tooltip"] = `addr: ${hx(ctx.labels[t]!)}`;
+            return [el];
+        }
+        return [sp("fn", t)];
     };
 
     const toks = rest.split(",");
-    html +=
-        " " +
-        toks
-            .map((tok, i) => tokenHtml(tok, i === toks.length - 1) + (i < toks.length - 1 ? "," : ""))
-            .join(" ");
-    return html;
+    wrapper.append(" ");
+    toks.forEach((tok, i) => {
+        wrapper.append(...makeToken(tok, i === toks.length - 1));
+        if (i < toks.length - 1) wrapper.append(",");
+        if (i < toks.length - 1) wrapper.append(" ");
+    });
+    return wrapper;
+}
+
+// ─── ASM view DOM helpers ─────────────────────────────────────────────────
+function makeLine(addr: number | null): HTMLDivElement {
+    const el = document.createElement("div");
+    el.className = "line";
+    if (addr != null) el.id = `al-${addr.toString(16)}`;
+    return el;
+}
+
+function pcArrowEl(): HTMLSpanElement {
+    return sp("pc-arrow", "▶");
+}
+
+function addrSpan(addr: number): HTMLSpanElement {
+    return sp("asm-addr", hx(addr));
+}
+
+function emptyAddrSpan(): HTMLSpanElement {
+    return sp("asm-addr", "");
+}
+
+function makeInfoIcon(tooltip: string): HTMLSpanElement {
+    const s = document.createElement("span");
+    s.className = "instr-info";
+    s.dataset["tooltip"] = tooltip;
+    s.innerHTML = INSTR_INFO_ICON;
+    return s;
+}
+
+function makeInstrSpan(raw: string, ctx: HlCtx): HTMLElement {
+    const wrapper = document.createElement("span");
+    wrapper.append("  ", highlightInstr(raw, ctx));
+    return wrapper;
 }
 
 // ─── C syntax highlighter ─────────────────────────────────────────────────
@@ -187,34 +243,44 @@ function highlightC(code: string): string {
 function buildAssembledView(assembled: AssemblyResult): void {
     const { sourceInstrs } = assembled;
     const el = document.getElementById("view-asm")!;
-    let html = "";
+    el.textContent = "";
     let lastLabel = null;
 
     for (const si of sourceInstrs) {
         if (si.label !== lastLabel) {
             if (lastLabel !== null) {
-                html += `<div class="line"><span class="asm-addr"></span><span> </span></div>`;
+                const sep = makeLine(null);
+                sep.append(emptyAddrSpan(), document.createTextNode(" "));
+                el.appendChild(sep);
             }
-            html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.label}:</span></div>`;
+            const lblLine = makeLine(null);
+            lblLine.append(emptyAddrSpan(), sp("lbl", `${si.label}:`));
+            el.appendChild(lblLine);
             lastLabel = si.label;
         }
         if (si.concretes.length === 1) {
             const c = si.concretes[0]!;
             const ciAddr = si.firstAddr;
-            html += `<div class="line" id="al-${ciAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span><span class="instr-info" data-tooltip="${si.raw}">${INSTR_INFO_ICON}</span></div>`;
+            const ctx: HlCtx = { labels: assembled.labels, addr: ciAddr };
+            const line = makeLine(ciAddr);
+            line.append(pcArrowEl(), addrSpan(ciAddr), makeInstrSpan(fmtConcreteRel(c, ciAddr), ctx), makeInfoIcon(si.raw));
+            el.appendChild(line);
         } else {
-            html += `<div class="concrete-group">`;
+            const group = document.createElement("div");
+            group.className = "concrete-group";
             for (let i = 0; i < si.concretes.length; i++) {
                 const c = si.concretes[i]!;
                 const ciAddr = si.firstAddr + i * 4;
-                html += `<div class="line" id="al-${ciAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span></div>`;
+                const ctx: HlCtx = { labels: assembled.labels, addr: ciAddr };
+                const line = makeLine(ciAddr);
+                line.append(pcArrowEl(), addrSpan(ciAddr), makeInstrSpan(fmtConcreteRel(c, ciAddr), ctx));
+                group.appendChild(line);
             }
-            html += `<span class="instr-info" data-tooltip="${si.raw}">${INSTR_INFO_ICON}</span>`;
-            html += `</div>`;
+            group.appendChild(makeInfoIcon(si.raw));
+            el.appendChild(group);
         }
     }
 
-    el.innerHTML = html;
     createIcons({ icons: { Info }, attrs: { width: "13", height: "13" } });
 }
 
@@ -222,22 +288,28 @@ function buildAssembledView(assembled: AssemblyResult): void {
 function buildAsmView(assembled: AssemblyResult): void {
     const { sourceInstrs } = assembled;
     const el = document.getElementById("view-asm")!;
-    let html = "";
+    el.textContent = "";
     let lastLabel = null;
 
     for (const si of sourceInstrs) {
         if (si.label !== lastLabel) {
             if (lastLabel !== null) {
-                html += `<div class="line"><span class="asm-addr"></span><span> </span></div>`;
+                const sep = makeLine(null);
+                sep.append(emptyAddrSpan(), document.createTextNode(" "));
+                el.appendChild(sep);
             }
-            html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.label}:</span></div>`;
+            const lblLine = makeLine(null);
+            lblLine.append(emptyAddrSpan(), sp("lbl", `${si.label}:`));
+            el.appendChild(lblLine);
             lastLabel = si.label;
         }
-        const tipContent = si.concretes.map((c, i) => fmtConcreteRel(c, si.firstAddr + i * 4)).join("&#10;");
-        html += `<div class="line" id="al-${si.firstAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span><span class="instr-info" data-tooltip="${tipContent}">${INSTR_INFO_ICON}</span></div>`;
+        const tipContent = si.concretes.map((c, i) => fmtConcreteRel(c, si.firstAddr + i * 4)).join("\n");
+        const ctx: HlCtx = { labels: assembled.labels, addr: si.firstAddr };
+        const line = makeLine(si.firstAddr);
+        line.append(pcArrowEl(), addrSpan(si.firstAddr), makeInstrSpan(si.raw, ctx), makeInfoIcon(tipContent));
+        el.appendChild(line);
     }
 
-    el.innerHTML = html;
     createIcons({ icons: { Info }, attrs: { width: "13", height: "13" } });
 }
 
@@ -799,10 +871,17 @@ document.addEventListener("mouseover", (e) => {
     }
     tt.textContent = el.dataset["tooltip"] ?? null;
     tt.style.display = "block";
+
+    const targetEl = (e.target as Element | null)?.closest("[data-target-addr]") as HTMLElement | null;
+    if (targetEl) {
+        const addr = parseInt(targetEl.dataset["targetAddr"]!);
+        document.getElementById(`al-${addr.toString(16)}`)?.classList.add("target-hl");
+    }
 });
 document.addEventListener("mouseout", (e) => {
     if (!(e.target as Element | null)?.closest("[data-tooltip]")) return;
     tt.style.display = "none";
+    document.querySelectorAll(".target-hl").forEach(el => el.classList.remove("target-hl"));
 });
 document.addEventListener("mousemove", (e) => {
     if (tt.style.display === "none") return;

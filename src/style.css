@@ -35,6 +35,23 @@ body {
     flex-direction: column;
 }
 
+/* ── APP HEADER ── */
+.app-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+.app-title {
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.03em;
+}
+
 /* ── MAIN GRID ── */
 .main {
     flex: 1;
@@ -372,6 +389,16 @@ body {
 [data-tooltip] {
     cursor: default;
 }
+[data-target-addr] {
+    cursor: pointer;
+    text-decoration: underline dotted currentColor;
+    text-underline-offset: 2px;
+}
+.line.target-hl {
+    background: var(--purple-dim);
+    border-left-color: var(--purple);
+    transition: none;
+}
 .instr-info {
     position: absolute;
     right: 10px;
@@ -409,7 +436,7 @@ body {
 
 /* ── CONTROLS ── */
 .controls {
-    border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border);
     background: var(--surface);
     padding: 6px 16px;
     display: flex;

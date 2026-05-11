@@ -11,25 +11,9 @@
         <link rel="stylesheet" href="./style.css" />
     </head>
     <body>
-        <div class="controls">
-            <select class="btn" id="prog-select"></select>
-            <span class="step-counter" id="step-counter">0 / 0</span>
-            <div class="progress-bar">
-                <div
-                    class="progress-fill"
-                    id="progress-fill"
-                    style="width: 0%"
-                ></div>
-                <div id="progress-thumb"></div>
-            </div>
-            <button class="btn" id="btn-prev" disabled>
-                ← Anterior
-            </button>
-            <button class="btn" id="btn-next">
-                Siguiente →
-            </button>
-        </div>
-
+        <header class="app-header">
+            <span class="app-title">RISC-V Simulator</span>
+        </header>
         <div class="main">
             <!-- LEFT: assembly / C -->
             <div class="code-panel">
@@ -90,6 +74,25 @@
                     <!-- filled by JS -->
                 </div>
             </div>
+        </div>
+
+        <div class="controls">
+            <select class="btn" id="prog-select"></select>
+            <span class="step-counter" id="step-counter">0 / 0</span>
+            <div class="progress-bar">
+                <div
+                    class="progress-fill"
+                    id="progress-fill"
+                    style="width: 0%"
+                ></div>
+                <div id="progress-thumb"></div>
+            </div>
+            <button class="btn" id="btn-prev" disabled>
+                ← Anterior
+            </button>
+            <button class="btn" id="btn-next">
+                Siguiente →
+            </button>
         </div>
 
         <script type="module" src="./main.ts"></script>
