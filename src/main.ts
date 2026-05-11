@@ -7,9 +7,12 @@ import type {
     TokenKind,
 } from "./types";
 import { ParseError, RangeError } from "./types";
-import { hx, assembleProgram, fmtConcrete, fmtConcreteRel } from "./assembler";
+import { hx, assembleProgram, fmtConcreteRel } from "./assembler";
 import { ALL_REGS, REG_META, REG_SET, simulate } from "./simulator";
 import { PROGRAMS } from "./programs";
+import { createIcons, Info } from "lucide";
+
+const INSTR_INFO_ICON = `<i data-lucide="info"></i>`;
 
 // Colors cycling per frame depth (index 0 = outermost active frame)
 const FRAME_COLORS = [
@@ -23,22 +26,29 @@ const OFFSET_MAX = 64; // only show sp±N labels within this range
 
 
 // ─── Syntax highlighter ───────────────────────────────────────────────────
+const JUMP_OPS = new Set(["jal", "beq", "bne", "blt", "bge", "bltu", "bgeu"]);
+
 function highlightInstr(raw: string): string {
     const s = raw.trim();
     const sp = s.indexOf(" ");
     const op = sp === -1 ? s : s.slice(0, sp);
     const rest = sp === -1 ? "" : s.slice(sp + 1);
+    const isJump = JUMP_OPS.has(op);
 
     let html = `<span class="kw">${op}</span>`;
     if (!rest) return html;
 
-    const tokenHtml = (tok: string): string => {
+    const tokenHtml = (tok: string, isLast: boolean): string => {
         const t = tok.trim();
         const memM = t.match(/^(-?\d+)\((\w+)\)$/);
         if (memM)
             return `<span class="imm">${memM[1]}</span>(<span class="reg">${memM[2]}</span>)`;
         if (REG_SET.has(t)) return `<span class="reg">${t}</span>`;
-        if (/^-?\d+$/.test(t)) return `<span class="imm">${t}</span>`;
+        if (/^[+-]?\d+$/.test(t)) {
+            return isJump && isLast
+                ? `<span class="fn">${t}</span>`
+                : `<span class="imm">${t}</span>`;
+        }
         return `<span class="fn">${t}</span>`;
     };
 
@@ -46,7 +56,7 @@ function highlightInstr(raw: string): string {
     html +=
         " " +
         toks
-            .map((tok, i) => tokenHtml(tok) + (i < toks.length - 1 ? "," : ""))
+            .map((tok, i) => tokenHtml(tok, i === toks.length - 1) + (i < toks.length - 1 ? "," : ""))
             .join(" ");
     return html;
 }
@@ -191,21 +201,21 @@ function buildAssembledView(assembled: AssemblyResult): void {
         if (si.concretes.length === 1) {
             const c = si.concretes[0]!;
             const ciAddr = si.firstAddr;
-            html += `<div class="line" id="al-${ciAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span></div>`;
+            html += `<div class="line" id="al-${ciAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span><span class="instr-info" data-tooltip="${si.raw}">${INSTR_INFO_ICON}</span></div>`;
         } else {
-            const tip = ` data-tooltip="${si.raw}"`;
             html += `<div class="concrete-group">`;
             for (let i = 0; i < si.concretes.length; i++) {
                 const c = si.concretes[i]!;
                 const ciAddr = si.firstAddr + i * 4;
-                const tipAttr = tip;
-                html += `<div class="line" id="al-${ciAddr.toString(16)}"${tipAttr}><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span></div>`;
+                html += `<div class="line" id="al-${ciAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span></div>`;
             }
+            html += `<span class="instr-info" data-tooltip="${si.raw}">${INSTR_INFO_ICON}</span>`;
             html += `</div>`;
         }
     }
 
     el.innerHTML = html;
+    createIcons({ icons: { Info }, attrs: { width: "13", height: "13" } });
 }
 
 // ─── Build assembly view ───────────────────────────────────────────────────
@@ -223,11 +233,12 @@ function buildAsmView(assembled: AssemblyResult): void {
             html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.label}:</span></div>`;
             lastLabel = si.label;
         }
-        const tip = ` data-tooltip="${si.concretes.map((c, i) => fmtConcrete(c, si.firstAddr + i * 4)).join("&#10;")}"`;
-        html += `<div class="line" id="al-${si.firstAddr.toString(16)}"${tip}><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span></div>`;
+        const tipContent = si.concretes.map((c, i) => fmtConcreteRel(c, si.firstAddr + i * 4)).join("&#10;");
+        html += `<div class="line" id="al-${si.firstAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span><span class="instr-info" data-tooltip="${tipContent}">${INSTR_INFO_ICON}</span></div>`;
     }
 
     el.innerHTML = html;
+    createIcons({ icons: { Info }, attrs: { width: "13", height: "13" } });
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────

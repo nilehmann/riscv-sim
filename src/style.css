@@ -73,6 +73,7 @@ body {
         background 0.25s,
         border-color 0.25s;
     border-left: 2px solid transparent;
+    position: relative;
 }
 .line.hl {
     background: rgba(9, 105, 218, 0.07);
@@ -371,6 +372,26 @@ body {
 [data-tooltip] {
     cursor: default;
 }
+.instr-info {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+    cursor: default;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.line:hover .instr-info {
+    opacity: 1;
+}
+.instr-info:hover {
+    color: var(--text-dim);
+}
 #tooltip {
     position: fixed;
     background: var(--text);
@@ -553,6 +574,14 @@ select.btn {
     border-radius: 6px;
     overflow: hidden;
     margin: 2px 8px;
+    position: relative;
+}
+.concrete-group:hover > .instr-info {
+    opacity: 1;
+}
+.concrete-group > .instr-info {
+    top: 6px;
+    transform: none;
 }
 .concrete-group .line {
     padding-left: 8px;
