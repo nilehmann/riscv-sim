@@ -814,7 +814,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
     }
 
     // Emit initial step (state before first instruction)
-    steps.push(makeStep(snap(), ["sp", "ra", "a0"], [], null, pc));
+    steps.push(makeStep(snap(), [], [], null, pc));
 
     const MAX_STEPS = 500;
 
@@ -1123,25 +1123,38 @@ function render(s: Step): void {
         }, 400);
     }
 
-    // Next-instruction arrow
+    // Next-instruction arrow — clear immediately, re-add after highlight finishes
+    clearTimeout(_nextInstrTimeout ?? undefined);
     document
         .querySelectorAll("#view-asm .line.next-instr")
         .forEach((el) => el.classList.remove("next-instr"));
-    if (s.nextAddr != null) {
-        const el = document.getElementById("al-" + s.nextAddr.toString(16));
-        if (el) {
-            el.classList.add("next-instr");
-            if ((s.aHl || []).length === 0)
-                el.scrollIntoView({
-                    block: "nearest",
-                    behavior: "smooth",
-                });
+    const applyNextInstr = (): void => {
+        if (s.nextAddr != null) {
+            const el = document.getElementById("al-" + s.nextAddr.toString(16));
+            if (el) {
+                el.classList.add("next-instr");
+                if ((s.aHl || []).length === 0)
+                    el.scrollIntoView({
+                        block: "nearest",
+                        behavior: "smooth",
+                    });
+            }
         }
+    };
+    if ((s.aHl || []).length > 0) {
+        _nextInstrTimeout = setTimeout(applyNextInstr, 400);
+    } else {
+        applyNextInstr();
     }
 
     // Registers
     const hiR = new Set(s.hiReg || []);
-    document.getElementById("reg-list")!.innerHTML = DISPLAY_REGS.map((r) => {
+    const pcRow = `<div class="reg-row pc-row">
+  <span class="reg-name">pc</span>
+  <span class="reg-val">${s.nextAddr != null ? hx(s.nextAddr) : "?"}</span>
+  <span class="reg-desc">program counter</span>
+</div>`;
+    document.getElementById("reg-list")!.innerHTML = pcRow + DISPLAY_REGS.map((r) => {
         const val = s.regs ? s.regs[r.key] : null;
         const tip =
             val != null
@@ -1233,10 +1246,9 @@ function buildStack(s: Step): void {
                     ? `data-tooltip="sin signo: ${val >>> 0}&#10;con signo: ${val | 0}"`
                     : "";
             const isHi = hiS.has(addr);
-            const bg = isHi ? "var(--orange-dim)" : color;
             const nameColor = label ? "var(--blue)" : "";
             frameSlots +=
-                `<div class="frame-slot" id="slot-${addr.toString(16)}" style="background:${bg}">` +
+                `<div class="frame-slot${isHi ? ' hi' : ''}" id="slot-${addr.toString(16)}" style="background:${color}">` +
                 `<span class="slot-name"${nameColor ? ` style="color:${nameColor}"` : ""}>${slotName}</span>` +
                 `<span class="slot-val" ${slotTip}>${slotVal}</span></div>`;
         }
@@ -1372,6 +1384,7 @@ function switchTab(tab: "asm" | "c"): void {
 
 // ─── Navigation ───────────────────────────────────────────────────────────
 let _hlTimeout: ReturnType<typeof setTimeout> | null = null;
+let _nextInstrTimeout: ReturnType<typeof setTimeout> | null = null;
 let cur = 0;
 let STEPS: Step[] = [];
 
