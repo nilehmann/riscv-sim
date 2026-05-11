@@ -1,7 +1,6 @@
 import type {
     Program,
     ParsedInstr,
-    AssembledInstrs,
     ConcreteSpec,
     ConcreteInstr,
     SourceInstr,
@@ -360,7 +359,7 @@ function assembleInstr(
     labels: Record<string, number>,
     raw: string,
     fn: string,
-): AssembledInstrs | RangeError {
+): ConcreteSpec[] | RangeError {
     const p = parsed;
     // JAL range: signed 21-bit offset, must be multiple of 2 → ±1 MiB
     const JAL_MAX = (1 << 20) - 1;
@@ -386,20 +385,11 @@ function assembleInstr(
 
     switch (p.op) {
         case "ret":
-            return {
-                instrs: [{ op: "jalr", rd: "zero", rs1: "ra", imm: 0 }],
-                isPseudo: true,
-            };
+            return [{ op: "jalr", rd: "zero", rs1: "ra", imm: 0 }];
         case "nop":
-            return {
-                instrs: [{ op: "addi", rd: "zero", rs1: "zero", imm: 0 }],
-                isPseudo: true,
-            };
+            return [{ op: "addi", rd: "zero", rs1: "zero", imm: 0 }];
         case "jalr":
-            return {
-                instrs: [{ op: "jalr", rd: p.rd, rs1: p.rs1, imm: p.imm }],
-                isPseudo: false,
-            };
+            return [{ op: "jalr", rd: p.rd, rs1: p.rs1, imm: p.imm }];
         case "call": {
             const offset = resolveJalOffset(p.target);
             if (offset instanceof RangeError) {
@@ -408,70 +398,39 @@ function assembleInstr(
                 const off = labelAddr - addr;
                 const lo = ((off & 0xfff) << 20) >> 20;
                 const hi = (off - lo) >> 12;
-                return {
-                    instrs: [
-                        { op: "auipc", rd: "ra", imm: hi },
-                        { op: "jalr", rd: "ra", rs1: "ra", imm: lo },
-                    ],
-                    isPseudo: true,
-                };
+                return [
+                    { op: "auipc", rd: "ra", imm: hi },
+                    { op: "jalr", rd: "ra", rs1: "ra", imm: lo },
+                ];
             }
-            // Fits in JAL range: emit single jal
-            return {
-                instrs: [{ op: "jal", rd: "ra", target: offset }],
-                isPseudo: true,
-            };
+            return [{ op: "jal", rd: "ra", target: offset }];
         }
         case "j": {
             const offset = resolveJalOffset(p.target);
             if (offset instanceof RangeError) return offset;
-            return {
-                instrs: [{ op: "jal", rd: "zero", target: offset }],
-                isPseudo: true,
-            };
+            return [{ op: "jal", rd: "zero", target: offset }];
         }
         case "jal": {
             const offset = resolveJalOffset(p.target);
             if (offset instanceof RangeError) return offset;
-            return {
-                instrs: [{ op: "jal", rd: p.rd, target: offset }],
-                isPseudo: false,
-            };
+            return [{ op: "jal", rd: p.rd, target: offset }];
         }
         case "li": {
             if (p.imm >= -2048 && p.imm <= 2047)
-                return {
-                    instrs: [{ op: "addi", rd: p.rd, rs1: "zero", imm: p.imm }],
-                    isPseudo: true,
-                };
+                return [{ op: "addi", rd: p.rd, rs1: "zero", imm: p.imm }];
             const lo = (p.imm << 20) >> 20;
             const hi = (p.imm - lo) >> 12;
-            return {
-                instrs: [
-                    { op: "lui", rd: p.rd, imm: hi },
-                    { op: "addi", rd: p.rd, rs1: p.rd, imm: lo },
-                ],
-                isPseudo: true,
-            };
+            return [
+                { op: "lui", rd: p.rd, imm: hi },
+                { op: "addi", rd: p.rd, rs1: p.rd, imm: lo },
+            ];
         }
-        case "lui": {
-            return {
-                instrs: [{ op: "lui", rd: p.rd, imm: p.imm }],
-                isPseudo: false,
-            };
-        }
-        case "mv": {
-            return {
-                instrs: [{ op: "addi", rd: p.rd, rs1: p.rs1, imm: 0 }],
-                isPseudo: true,
-            };
-        }
-        case "neg": {
-            return {
-                instrs: [{ op: "sub", rd: p.rd, rs1: "zero", rs2: p.rs1 }],
-                isPseudo: true,
-            };
-        }
+        case "lui":
+            return [{ op: "lui", rd: p.rd, imm: p.imm }];
+        case "mv":
+            return [{ op: "addi", rd: p.rd, rs1: p.rs1, imm: 0 }];
+        case "neg":
+            return [{ op: "sub", rd: p.rd, rs1: "zero", rs2: p.rs1 }];
         case "addi":
         case "slli":
         case "srli":
@@ -479,10 +438,7 @@ function assembleInstr(
         case "andi":
         case "ori":
         case "xori":
-            return {
-                instrs: [{ op: p.op, rd: p.rd, rs1: p.rs1, imm: p.imm }],
-                isPseudo: false,
-            };
+            return [{ op: p.op, rd: p.rd, rs1: p.rs1, imm: p.imm }];
         case "add":
         case "sub":
         case "mul":
@@ -494,28 +450,17 @@ function assembleInstr(
         case "sll":
         case "srl":
         case "sra":
-            return {
-                instrs: [{ op: p.op, rd: p.rd, rs1: p.rs1, rs2: p.rs2 }],
-                isPseudo: false,
-            };
+            return [{ op: p.op, rd: p.rd, rs1: p.rs1, rs2: p.rs2 }];
         case "sw":
         case "sh":
         case "sb":
-            return {
-                instrs: [
-                    { op: p.op, rs2: p.rs2, offset: p.offset, rs1: p.rs1 },
-                ],
-                isPseudo: false,
-            };
+            return [{ op: p.op, rs2: p.rs2, offset: p.offset, rs1: p.rs1 }];
         case "lw":
         case "lh":
         case "lb":
         case "lhu":
         case "lbu":
-            return {
-                instrs: [{ op: p.op, rd: p.rd, offset: p.offset, rs1: p.rs1 }],
-                isPseudo: false,
-            };
+            return [{ op: p.op, rd: p.rd, offset: p.offset, rs1: p.rs1 }];
         case "beq":
         case "bne":
         case "blt":
@@ -524,10 +469,7 @@ function assembleInstr(
         case "bgeu": {
             const offset = resolveBranchOffset(p.target);
             if (offset instanceof RangeError) return offset;
-            return {
-                instrs: [{ op: p.op, rs1: p.rs1, rs2: p.rs2, target: offset }],
-                isPseudo: false,
-            };
+            return [{ op: p.op, rs1: p.rs1, rs2: p.rs2, target: offset }];
         }
         default:
             const _exhaustiveCheck: never = p;
@@ -577,14 +519,10 @@ function assembleProgram(
 
     const labels: Record<string, number> = {};
     let addr = prog.baseAddress;
-    // Walk again by function to record label addresses at function boundaries.
-    let lineIdx = 0;
-    for (const [fn, lines] of Object.entries(prog.functions)) {
-        labels[fn] = addr;
-        for (const _line of lines) {
-            addr += worstCaseSize(parsedLines[lineIdx]!.parsed) * 4;
-            lineIdx++;
-        }
+    let prevFn = "";
+    for (const { fn, parsed } of parsedLines) {
+        if (fn !== prevFn) { labels[fn] = addr; prevFn = fn; }
+        addr += worstCaseSize(parsed) * 4;
     }
 
     // ── Pass 2: assemble with known labels, compute real addresses ─────────
@@ -595,22 +533,14 @@ function assembleProgram(
     for (const { fn, raw, parsed } of parsedLines) {
         const assembled = assembleInstr(parsed, addr, labels, raw, fn);
         if (assembled instanceof RangeError) return assembled;
-        const concreteSpecs: ConcreteSpec[] = assembled.instrs;
         const firstAddr = addr;
         const concretes: ConcreteInstr[] = [];
-        for (const spec of concreteSpecs) {
+        for (const spec of assembled) {
             addrToSourceIdx.set(addr, sourceInstrs.length);
             concretes.push({ addr, ...spec });
             addr += 4;
         }
-        sourceInstrs.push({
-            fn,
-            raw,
-            parsed,
-            concretes,
-            firstAddr,
-            isPseudo: assembled.isPseudo,
-        });
+        sourceInstrs.push({ fn, raw, parsed, concretes, firstAddr });
     }
 
     // Build real label addresses from actual pass-2 instruction positions.
@@ -1012,12 +942,6 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                     break;
                 }
 
-                case "ret": {
-                    pc = regs.ra & ~1;
-                    hiReg.push("ra", "a0");
-                    break;
-                }
-
                 case "sw":
                 case "sh":
                 case "sb": {
@@ -1151,9 +1075,7 @@ function buildAsmView(assembled: AssemblyResult): void {
             html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.fn}:</span></div>`;
             lastFn = si.fn;
         }
-        const tip = si.isPseudo
-            ? ` data-tooltip="${si.concretes.map(fmtConcrete).join("&#10;")}"`
-            : "";
+        const tip = ` data-tooltip="${si.concretes.map(fmtConcrete).join("&#10;")}"`;
         html += `<div class="line" id="al-${si.firstAddr.toString(16)}"${tip}><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span></div>`;
     }
 

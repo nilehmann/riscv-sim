@@ -61,7 +61,6 @@ export class RangeError {
 }
 
 export type ConcreteSpec =
-    | { op: "ret" }
     | { op: "jalr"; rd: string; rs1: string; imm: number }
     | { op: "lui" | "auipc"; rd: string; imm: number }
     | { op: "jal"; rd: string; target: number } // PC-relative offset
@@ -104,19 +103,12 @@ export type ConcreteSpec =
 
 export type ConcreteInstr = ConcreteSpec & { addr: number };
 
-export type AssembledInstrs = {
-    instrs: ConcreteSpec[];
-    /// Whether the list of instructions came from a pseudo-instruction.
-    isPseudo: boolean;
-};
-
 export interface SourceInstr {
     fn: string;
     raw: string;
     parsed: ParsedInstr;
     concretes: ConcreteInstr[];
     firstAddr: number;
-    isPseudo: boolean;
 }
 
 export interface AssemblyResult {
