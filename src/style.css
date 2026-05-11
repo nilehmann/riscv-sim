@@ -519,3 +519,42 @@ select.btn {
     opacity: 0.35;
     cursor: default;
 }
+.asm-mode-bar {
+    display: flex;
+    align-items: center;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+}
+.asm-mode-btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 3px 12px;
+    border: none;
+    background: var(--surface2);
+    color: var(--text-dim);
+    cursor: pointer;
+    line-height: 1.6;
+    transition: background 0.15s, color 0.15s;
+}
+.asm-mode-btn:first-child {
+    border-radius: 999px 0 0 999px;
+}
+.asm-mode-btn:last-child {
+    border-radius: 0 999px 999px 0;
+}
+.asm-mode-btn.active {
+    background: var(--text);
+    color: var(--bg);
+}
+.concrete-group {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 2px 8px;
+}
+.concrete-group .line {
+    padding-left: 8px;
+    padding-right: 8px;
+}

@@ -7,7 +7,7 @@ import type {
     TokenKind,
 } from "./types";
 import { ParseError, RangeError } from "./types";
-import { hx, assembleProgram, fmtConcrete } from "./assembler";
+import { hx, assembleProgram, fmtConcrete, fmtConcreteRel } from "./assembler";
 import { ALL_REGS, REG_META, REG_SET, simulate } from "./simulator";
 import { PROGRAMS } from "./programs";
 
@@ -173,6 +173,41 @@ function highlightC(code: string): string {
         .join("");
 }
 
+// ─── Build assembled (concrete) view ──────────────────────────────────────
+function buildAssembledView(assembled: AssemblyResult): void {
+    const { sourceInstrs } = assembled;
+    const el = document.getElementById("view-asm")!;
+    let html = "";
+    let lastLabel = null;
+
+    for (const si of sourceInstrs) {
+        if (si.label !== lastLabel) {
+            if (lastLabel !== null) {
+                html += `<div class="line"><span class="asm-addr"></span><span> </span></div>`;
+            }
+            html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.label}:</span></div>`;
+            lastLabel = si.label;
+        }
+        if (si.concretes.length === 1) {
+            const c = si.concretes[0]!;
+            const ciAddr = si.firstAddr;
+            html += `<div class="line" id="al-${ciAddr.toString(16)}"><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span></div>`;
+        } else {
+            const tip = ` data-tooltip="${si.raw}"`;
+            html += `<div class="concrete-group">`;
+            for (let i = 0; i < si.concretes.length; i++) {
+                const c = si.concretes[i]!;
+                const ciAddr = si.firstAddr + i * 4;
+                const tipAttr = tip;
+                html += `<div class="line" id="al-${ciAddr.toString(16)}"${tipAttr}><span class="pc-arrow">▶</span><span class="asm-addr">${hx(ciAddr)}</span><span>  ${highlightInstr(fmtConcreteRel(c, ciAddr))}</span></div>`;
+            }
+            html += `</div>`;
+        }
+    }
+
+    el.innerHTML = html;
+}
+
 // ─── Build assembly view ───────────────────────────────────────────────────
 function buildAsmView(assembled: AssemblyResult): void {
     const { sourceInstrs } = assembled;
@@ -230,12 +265,20 @@ function fmtRegVal(key: string, val: number | null): string {
 }
 
 function render(s: Step): void {
+    // Remap highlight addresses in source mode (concrete addr → source first addr)
+    const aHl = (_asmMode === "source" && _assembled)
+        ? (s.aHl || []).map((addr) => {
+              const idx = _assembled!.addrToSourceIdx.get(addr);
+              return idx != null ? _assembled!.sourceInstrs[idx]!.firstAddr : addr;
+          })
+        : (s.aHl || []);
+
     // Assembly highlight — keyed by instruction address
     document
         .querySelectorAll("#view-asm .line.hl")
         .forEach((el) => el.classList.remove("hl"));
     clearTimeout(_hlTimeout ?? undefined);
-    for (const addr of s.aHl || []) {
+    for (const addr of aHl) {
         const el = document.getElementById("al-" + addr.toString(16));
         if (el) {
             el.classList.add("hl");
@@ -245,7 +288,7 @@ function render(s: Step): void {
             });
         }
     }
-    if ((s.aHl || []).length > 0) {
+    if (aHl.length > 0) {
         _hlTimeout = setTimeout(() => {
             document
                 .querySelectorAll("#view-asm .line.hl")
@@ -263,7 +306,7 @@ function render(s: Step): void {
             const el = document.getElementById("al-" + s.nextAddr.toString(16));
             if (el) {
                 el.classList.add("next-instr");
-                if ((s.aHl || []).length === 0)
+                if (aHl.length === 0)
                     el.scrollIntoView({
                         block: "nearest",
                         behavior: "smooth",
@@ -271,7 +314,7 @@ function render(s: Step): void {
             }
         }
     };
-    if ((s.aHl || []).length > 0) {
+    if (aHl.length > 0) {
         _nextInstrTimeout = setTimeout(applyNextInstr, 400);
     } else {
         applyNextInstr();
@@ -305,19 +348,20 @@ function render(s: Step): void {
         positionOffsets(s);
     });
 
-    // Controls
+    // Controls — mode-aware position and total
+    const posIdx = _asmMode === "source" ? currentSourcePosIdx() : cur;
+    const total = _asmMode === "source" ? _sourcePositions.length : STEPS.length;
     document.getElementById("step-counter")!.textContent =
-        `${cur + 1} / ${STEPS.length}`;
-    const n = STEPS.length;
-    const pct = n <= 1 ? 100 : (cur / (n - 1)) * 100;
+        `${posIdx + 1} / ${total}`;
+    const pct = total <= 1 ? 100 : (posIdx / (total - 1)) * 100;
     (document.getElementById("progress-fill") as HTMLElement).style.width =
         pct + "%";
     (document.getElementById("progress-thumb") as HTMLElement).style.left =
         `clamp(7px, ${pct}%, calc(100% - 7px))`;
     (document.getElementById("btn-prev") as HTMLButtonElement).disabled =
-        cur === 0;
+        posIdx === 0;
     (document.getElementById("btn-next") as HTMLButtonElement).disabled =
-        cur === STEPS.length - 1;
+        posIdx === total - 1;
 }
 
 // ─── Stack builder ────────────────────────────────────────────────────────
@@ -497,6 +541,23 @@ function positionOffsets(s: Step): void {
     container.innerHTML = html;
 }
 
+// ─── Asm mode switcher ────────────────────────────────────────────────────
+function switchAsmMode(mode: "source" | "assembled"): void {
+    _asmMode = mode;
+    if (mode === "source") {
+        // Snap cur down to the nearest source boundary so we never land
+        // on an intermediate concrete step that has no row in source view.
+        cur = _sourcePositions[currentSourcePosIdx()]!;
+        buildAsmView(_assembled!);
+    } else {
+        buildAssembledView(_assembled!);
+    }
+    buildTicks();
+    render(STEPS[cur]!);
+    document.getElementById("btn-mode-source")!.classList.toggle("active", mode === "source");
+    document.getElementById("btn-mode-assembled")!.classList.toggle("active", mode === "assembled");
+}
+
 // ─── Tab switcher ─────────────────────────────────────────────────────────
 let _activeTab: "asm" | "c" = "asm";
 
@@ -517,25 +578,49 @@ let _hlTimeout: ReturnType<typeof setTimeout> | null = null;
 let _nextInstrTimeout: ReturnType<typeof setTimeout> | null = null;
 let cur = 0;
 let STEPS: Step[] = [];
+let _asmMode: "source" | "assembled" = "source";
+let _sourcePositions: number[] = []; // [0, sourceToConcrete[0], ...]
+let _assembled: AssemblyResult | null = null;
 
 function goTo(idx: number): void {
     cur = Math.max(0, Math.min(STEPS.length - 1, idx));
     render(STEPS[cur]!);
 }
 
+function currentSourcePosIdx(): number {
+    let p = 0;
+    for (let i = _sourcePositions.length - 1; i >= 0; i--) {
+        if (_sourcePositions[i]! <= cur) { p = i; break; }
+    }
+    return p;
+}
+
 function go(dir: number): void {
-    goTo(cur + dir);
+    if (_asmMode === "assembled") { goTo(cur + dir); return; }
+    const p = currentSourcePosIdx();
+    const newP = Math.max(0, Math.min(_sourcePositions.length - 1, p + dir));
+    goTo(_sourcePositions[newP]!);
 }
 
 // ─── Program loader ───────────────────────────────────────────────────────
 function buildTicks(): void {
     bar.querySelectorAll(".step-tick").forEach((el) => el.remove());
-    const n = STEPS.length;
-    for (let i = 1; i < n - 1; i++) {
-        const tick = document.createElement("div");
-        tick.className = "step-tick";
-        tick.style.left = (i / (n - 1)) * 100 + "%";
-        bar.appendChild(tick);
+    if (_asmMode === "source") {
+        const n = _sourcePositions.length;
+        for (let i = 1; i < n - 1; i++) {
+            const tick = document.createElement("div");
+            tick.className = "step-tick";
+            tick.style.left = (i / (n - 1)) * 100 + "%";
+            bar.appendChild(tick);
+        }
+    } else {
+        const n = STEPS.length;
+        for (let i = 1; i < n - 1; i++) {
+            const tick = document.createElement("div");
+            tick.className = "step-tick";
+            tick.style.left = (i / (n - 1)) * 100 + "%";
+            bar.appendChild(tick);
+        }
     }
 }
 
@@ -608,11 +693,17 @@ function loadProgram(prog: Program): void {
 
     _firstArrowRender = true;
     DISPLAY_REGS = computeDisplayRegs(prog, assembled);
-    STEPS = simulate(prog, assembled);
+    const { steps, sourceToConcrete } = simulate(prog, assembled);
+    STEPS = steps;
+    _sourcePositions = [0, ...sourceToConcrete];
+    _assembled = assembled;
+    _asmMode = "source";
     cur = 0;
     buildAsmView(assembled);
     render(STEPS[0]!);
     buildTicks();
+    document.getElementById("btn-mode-source")!.classList.add("active");
+    document.getElementById("btn-mode-assembled")!.classList.remove("active");
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────
@@ -635,7 +726,12 @@ function scrubTo(e: PointerEvent): void {
         1,
         Math.max(0, (e.clientX - rect.left) / rect.width),
     );
-    goTo(Math.round(ratio * (STEPS.length - 1)));
+    if (_asmMode === "source") {
+        const posIdx = Math.round(ratio * (_sourcePositions.length - 1));
+        goTo(_sourcePositions[posIdx]!);
+    } else {
+        goTo(Math.round(ratio * (STEPS.length - 1)));
+    }
 }
 bar.addEventListener("pointerdown", (e) => {
     fill.classList.add("scrubbing");
@@ -713,6 +809,8 @@ document.addEventListener("mousemove", (e) => {
 // ─── Button event listeners (replaces inline onclick attributes) ───────────
 document.getElementById("btn-prev")!.addEventListener("click", () => go(-1));
 document.getElementById("btn-next")!.addEventListener("click", () => go(1));
+document.getElementById("btn-mode-source")!.addEventListener("click", () => switchAsmMode("source"));
+document.getElementById("btn-mode-assembled")!.addEventListener("click", () => switchAsmMode("assembled"));
 document
     .getElementById("tab-asm")!
     .addEventListener("click", () => switchTab("asm"));

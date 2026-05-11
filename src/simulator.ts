@@ -1,4 +1,4 @@
-import type { Program, AssemblyResult, Step } from "./types";
+import type { Program, AssemblyResult, Step, SimulateResult } from "./types";
 
 // ─── Register metadata ────────────────────────────────────────────────────
 export const ALL_REGS = [
@@ -143,7 +143,7 @@ export class Machine {
 }
 
 // ─── Simulator ────────────────────────────────────────────────────────────
-export function simulate(prog: Program, assembled: AssemblyResult): Step[] {
+export function simulate(prog: Program, assembled: AssemblyResult): SimulateResult {
     const { sourceInstrs, addrToSourceIdx, labels } = assembled;
 
     const machine = new Machine(prog.initialRegs);
@@ -163,6 +163,7 @@ export function simulate(prog: Program, assembled: AssemblyResult): Step[] {
     ];
 
     const steps: Step[] = [];
+    const sourceToConcrete: number[] = [];
 
     function snap() {
         const { regs, mem } = machine.snapshot();
@@ -235,13 +236,11 @@ export function simulate(prog: Program, assembled: AssemblyResult): Step[] {
         if (siIdx == null) break;
         const si = sourceInstrs[siIdx];
 
-        const instrAddr = si.firstAddr;
-        let hiReg: string[] = [],
-            hiSlots: number[] = [];
-
         for (let ciIdx = 0; ciIdx < si.concretes.length; ciIdx++) {
             const ci = si.concretes[ciIdx]!;
             const ciAddr = si.firstAddr + ciIdx * 4;
+            let hiReg: string[] = [],
+                hiSlots: number[] = [];
             switch (ci.op) {
                 case "addi":
                 case "andi":
@@ -365,10 +364,10 @@ export function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                     break;
                 }
             }
+            steps.push(makeStep(snap(), hiReg, hiSlots, ciAddr, pc));
         }
-
-        steps.push(makeStep(snap(), hiReg, hiSlots, instrAddr, pc));
+        sourceToConcrete.push(steps.length - 1);
     }
 
-    return steps;
+    return { steps, sourceToConcrete };
 }

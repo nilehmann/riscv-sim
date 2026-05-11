@@ -132,6 +132,11 @@ export interface Step {
     callStack: FrameInfo[];
 }
 
+export interface SimulateResult {
+    steps: Step[];
+    sourceToConcrete: number[]; // steps index of last concrete step of source[i]
+}
+
 export interface DisplayReg {
     name: string;
     desc: string;
