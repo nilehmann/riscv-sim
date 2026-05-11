@@ -2,7 +2,6 @@ import type {
     Program,
     ParsedInstr,
     ConcreteSpec,
-    ConcreteInstr,
     SourceInstr,
     AssemblyResult,
     Step,
@@ -517,61 +516,58 @@ function assembleProgram(
     const parsedLines = parseProgram(prog);
     if (parsedLines instanceof ParseError) return parsedLines;
 
+    // Pass 1: section-relative addresses from 0 (baseAddress not involved).
     const labels: Record<string, number> = {};
-    let addr = prog.baseAddress;
+    let addr = 0;
     let prevFn = "";
     for (const { fn, parsed } of parsedLines) {
         if (fn !== prevFn) { labels[fn] = addr; prevFn = fn; }
         addr += worstCaseSize(parsed) * 4;
     }
 
-    // ── Pass 2: assemble with known labels, compute real addresses ─────────
+    // ── Pass 2: assemble with known labels, compute real section-relative addrs
     const sourceInstrs: SourceInstr[] = [];
     const addrToSourceIdx = new Map<number, number>();
-    addr = prog.baseAddress;
+    addr = 0;
 
     for (const { fn, raw, parsed } of parsedLines) {
         const assembled = assembleInstr(parsed, addr, labels, raw, fn);
         if (assembled instanceof RangeError) return assembled;
         const firstAddr = addr;
-        const concretes: ConcreteInstr[] = [];
+        const concretes: ConcreteSpec[] = [];
         for (const spec of assembled) {
             addrToSourceIdx.set(addr, sourceInstrs.length);
-            concretes.push({ addr, ...spec });
+            concretes.push(spec);
             addr += 4;
         }
         sourceInstrs.push({ fn, raw, parsed, concretes, firstAddr });
     }
 
-    // Build real label addresses from actual pass-2 instruction positions.
+    // Build real section-relative label addresses from actual pass-2 positions.
     const realLabels: Record<string, number> = {};
     for (const si of sourceInstrs) {
         if (!(si.fn in realLabels)) realLabels[si.fn] = si.firstAddr;
     }
 
-    // Fixup jump/branch targets: pass-2 stored `labels[target] - addr` using
-    // pessimistic pass-1 labels; patch to use real addresses instead.
+    // Fixup jump/branch targets using real section-relative addresses.
+    // si.firstAddr is the address of concretes[0]; concretes[1] is at +4.
     const BRANCH_OPS = new Set([
         "beq", "bne", "blt", "bge", "bltu", "bgeu",
     ]);
     for (const si of sourceInstrs) {
         const p = si.parsed;
-        if (
-            p.op === "call" ||
-            p.op === "jal" ||
-            p.op === "j"
-        ) {
+        if (p.op === "call" || p.op === "jal" || p.op === "j") {
             const realAddr = realLabels[p.target];
             if (realAddr == null) continue;
             if (si.concretes.length === 1) {
                 const ci = si.concretes[0]!;
                 if (ci.op === "jal")
-                    (ci as { target: number }).target = realAddr - ci.addr;
+                    (ci as { target: number }).target = realAddr - si.firstAddr;
             } else if (si.concretes.length === 2) {
                 const auipc = si.concretes[0]!;
                 const jalr = si.concretes[1]!;
                 if (auipc.op === "auipc" && jalr.op === "jalr") {
-                    const off = realAddr - auipc.addr;
+                    const off = realAddr - si.firstAddr;
                     const lo = ((off & 0xfff) << 20) >> 20;
                     const hi = (off - lo) >> 12;
                     (auipc as { imm: number }).imm = hi;
@@ -583,11 +579,25 @@ function assembleProgram(
             const realAddr = realLabels[target];
             if (realAddr == null) continue;
             const ci = si.concretes[0]!;
-            (ci as { target: number }).target = realAddr - ci.addr;
+            (ci as { target: number }).target = realAddr - si.firstAddr;
         }
     }
 
-    return { sourceInstrs, addrToSourceIdx, labels: realLabels };
+    // ── Load step: apply baseAddress to produce absolute addresses ────────────
+    // PC-relative offsets (jal.target, branch.target) are untouched —
+    // baseAddress cancels in (base + sectionTarget) - (base + sectionInstr).
+    for (const si of sourceInstrs) {
+        (si as { firstAddr: number }).firstAddr += prog.baseAddress;
+    }
+    const absAddrToSourceIdx = new Map<number, number>();
+    for (const [k, v] of addrToSourceIdx) {
+        absAddrToSourceIdx.set(k + prog.baseAddress, v);
+    }
+    for (const fn of Object.keys(realLabels)) {
+        realLabels[fn] += prog.baseAddress;
+    }
+
+    return { sourceInstrs, addrToSourceIdx: absAddrToSourceIdx, labels: realLabels };
 }
 
 // ─── Syntax highlighter ───────────────────────────────────────────────────
@@ -850,7 +860,9 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
             bgeu: (a, b) => a >>> 0 >= b >>> 0,
         };
 
-        for (const ci of si.concretes) {
+        for (let ciIdx = 0; ciIdx < si.concretes.length; ciIdx++) {
+            const ci = si.concretes[ciIdx]!;
+            const ciAddr = si.firstAddr + ciIdx * 4;
             switch (ci.op) {
                 case "addi":
                 case "andi":
@@ -907,7 +919,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                 }
 
                 case "auipc": {
-                    regs[ci.rd] = ci.addr + (ci.imm << 12);
+                    regs[ci.rd] = ciAddr + (ci.imm << 12);
                     syncFpS0(ci.rd);
                     pc += 4;
                     hiReg.push(ci.rd);
@@ -916,11 +928,11 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
 
                 case "jal": {
                     if (ci.rd !== "zero") {
-                        regs[ci.rd] = pc + 4;
+                        regs[ci.rd] = ciAddr + 4;
                         syncFpS0(ci.rd);
                         hiReg.push(ci.rd);
                     }
-                    pc = ci.addr + ci.target;
+                    pc = ciAddr + ci.target;
                     break;
                 }
 
@@ -934,7 +946,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                         });
                     }
                     if (ci.rd !== "zero") {
-                        regs[ci.rd] = pc + 4;
+                        regs[ci.rd] = ciAddr + 4;
                         syncFpS0(ci.rd);
                         hiReg.push(ci.rd);
                     }
@@ -977,7 +989,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                         regs[ci.rs1],
                         regs[ci.rs2],
                     );
-                    pc = taken ? ci.addr + ci.target : pc + 4;
+                    pc = taken ? ciAddr + ci.target : pc + 4;
                     break;
                 }
 
@@ -995,67 +1007,40 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
 }
 
 // ─── Concrete instruction serializer ──────────────────────────────────────
-function fmtConcrete(c: ConcreteInstr): string {
+function fmtConcrete(c: ConcreteSpec, addr: number): string {
     if (c.op === "jalr") return `jalr ${c.rd}, ${c.rs1}, ${c.imm}`;
-    if (c.op === "jal") return `jal ${c.rd}, ${hx(c.addr + c.target)}`;
+    if (c.op === "jal") return `jal ${c.rd}, ${hx(addr + c.target)}`;
     if (c.op === "lui" || c.op === "auipc") return `${c.op} ${c.rd}, ${c.imm}`;
     if (
         (
             ["addi", "andi", "ori", "xori", "slli", "srli", "srai"] as string[]
         ).includes(c.op)
     ) {
-        const ci = c as ConcreteInstr & {
-            rd: string;
-            rs1: string;
-            imm: number;
-        };
+        const ci = c as ConcreteSpec & { rd: string; rs1: string; imm: number };
         return `${ci.op} ${ci.rd}, ${ci.rs1}, ${ci.imm}`;
     }
     if (
         (
             [
-                "add",
-                "sub",
-                "mul",
-                "div",
-                "rem",
-                "and",
-                "or",
-                "xor",
-                "sll",
-                "srl",
-                "sra",
+                "add", "sub", "mul", "div", "rem",
+                "and", "or", "xor", "sll", "srl", "sra",
             ] as string[]
         ).includes(c.op)
     ) {
-        const ci = c as ConcreteInstr & {
-            rd: string;
-            rs1: string;
-            rs2: string;
-        };
+        const ci = c as ConcreteSpec & { rd: string; rs1: string; rs2: string };
         return `${ci.op} ${ci.rd}, ${ci.rs1}, ${ci.rs2}`;
     }
     if (c.op === "sw" || c.op === "sb" || c.op === "sh")
         return `${c.op} ${c.rs2}, ${c.offset}(${c.rs1})`;
     if ((["lw", "lb", "lh", "lbu", "lhu"] as string[]).includes(c.op)) {
-        const ci = c as ConcreteInstr & {
-            rd: string;
-            offset: number;
-            rs1: string;
-        };
+        const ci = c as ConcreteSpec & { rd: string; offset: number; rs1: string };
         return `${ci.op} ${ci.rd}, ${ci.offset}(${ci.rs1})`;
     }
     if (
-        (["beq", "bne", "blt", "bge", "bltu", "bgeu"] as string[]).includes(
-            c.op,
-        )
+        (["beq", "bne", "blt", "bge", "bltu", "bgeu"] as string[]).includes(c.op)
     ) {
-        const ci = c as ConcreteInstr & {
-            rs1: string;
-            rs2: string;
-            target: number;
-        };
-        return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${hx(c.addr + ci.target)}`;
+        const ci = c as ConcreteSpec & { rs1: string; rs2: string; target: number };
+        return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${hx(addr + ci.target)}`;
     }
     return c.op;
 }
@@ -1075,7 +1060,7 @@ function buildAsmView(assembled: AssemblyResult): void {
             html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.fn}:</span></div>`;
             lastFn = si.fn;
         }
-        const tip = ` data-tooltip="${si.concretes.map(fmtConcrete).join("&#10;")}"`;
+        const tip = ` data-tooltip="${si.concretes.map((c, i) => fmtConcrete(c, si.firstAddr + i * 4)).join("&#10;")}"`;
         html += `<div class="line" id="al-${si.firstAddr.toString(16)}"${tip}><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span></div>`;
     }
 
@@ -1469,7 +1454,7 @@ function loadProgram(prog: Program): void {
     const { sourceInstrs } = assembled;
     const progStart = prog.baseAddress;
     const lastSi = sourceInstrs[sourceInstrs.length - 1]!;
-    const progEnd = lastSi.concretes[lastSi.concretes.length - 1]!.addr + 4;
+    const progEnd = lastSi.firstAddr + lastSi.concretes.length * 4;
     const initRa = prog.initialRegs.ra ?? 0;
     if (initRa >= progStart && initRa < progEnd) {
         buildAsmView(assembled);

@@ -101,13 +101,11 @@ export type ConcreteSpec =
           target: number; // PC-relative offset
       };
 
-export type ConcreteInstr = ConcreteSpec & { addr: number };
-
 export interface SourceInstr {
     fn: string;
     raw: string;
     parsed: ParsedInstr;
-    concretes: ConcreteInstr[];
+    concretes: ConcreteSpec[];
     firstAddr: number;
 }
 
