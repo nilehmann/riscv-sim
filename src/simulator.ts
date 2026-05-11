@@ -156,7 +156,7 @@ export function simulate(prog: Program, assembled: AssemblyResult): Step[] {
     // allocatedSize: bytes claimed by the prologue so far.
     const callStack = [
         {
-            fn: prog.entryPoint,
+            label: prog.entryPoint,
             entrySpBefore: machine.regs.sp,
             allocatedSize: 0,
         },
@@ -257,7 +257,7 @@ export function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                     if (ci.rd === "sp") {
                         let top = null;
                         for (let i = callStack.length - 1; i >= 0; i--) {
-                            if (callStack[i].fn === si.fn) {
+                            if (callStack[i].label === si.label) {
                                 top = callStack[i];
                                 break;
                             }
@@ -311,7 +311,7 @@ export function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                     const jumpTarget = (machine.regs[ci.rs1] + ci.imm) & ~1;
                     if (si.parsed.op === "call") {
                         callStack.push({
-                            fn: (si.parsed as any).target,
+                            label: (si.parsed as any).target,
                             entrySpBefore: machine.regs.sp,
                             allocatedSize: 0,
                         });

@@ -136,7 +136,7 @@ function assembleInstr(
     addr: number,
     labels: Record<string, number>,
     raw: string,
-    fn: string,
+    label: string,
 ): ConcreteSpec[] | RangeError {
     const p = parsed;
     // JAL range: signed 21-bit offset, must be multiple of 2 → ±1 MiB
@@ -150,14 +150,14 @@ function assembleInstr(
         const labelAddr = labels[target];
         const offset = labelAddr - addr;
         if (offset < JAL_MIN || offset > JAL_MAX)
-            return new RangeError(raw, fn);
+            return new RangeError(raw, label);
         return offset;
     }
 
     function resolveBranchOffset(target: string): number | RangeError {
         const labelAddr = labels[target];
         const offset = labelAddr - addr;
-        if (offset < BR_MIN || offset > BR_MAX) return new RangeError(raw, fn);
+        if (offset < BR_MIN || offset > BR_MAX) return new RangeError(raw, label);
         return offset;
     }
 
@@ -269,20 +269,22 @@ function worstCaseSize(parsed: ParsedInstr): number {
     return 1;
 }
 
-type ParsedLine = { fn: string; raw: string; parsed: ParsedInstr };
+type ParsedLine = { label: string; raw: string; parsed: ParsedInstr };
 
-// Parses all instruction lines in the program and returns a flat list of
-// ParsedLine records, preserving the function each line belongs to.
-// Returns a ParseError on the first line that cannot be parsed.
 function parseProgram(prog: Program): ParsedLine[] | ParseError {
     const parsedLines: ParsedLine[] = [];
-    for (const [fn, lines] of Object.entries(prog.functions)) {
-        for (const line of lines) {
-            const parsed = parseInstr(line);
-            if (parsed instanceof ParseError)
-                return new ParseError(parsed.raw, fn);
-            parsedLines.push({ fn, raw: line.trim(), parsed });
+    let currentLabel = "";
+    for (const rawLine of prog.assembly.split("\n")) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#") || line.startsWith("//")) continue;
+        if (line.endsWith(":")) {
+            currentLabel = line.slice(0, -1).trim();
+            continue;
         }
+        const parsed = parseInstr(line);
+        if (parsed instanceof ParseError)
+            return new ParseError(parsed.raw, currentLabel);
+        parsedLines.push({ label: currentLabel, raw: line, parsed });
     }
     return parsedLines;
 }
@@ -298,9 +300,9 @@ export function assembleProgram(
     // Pass 1: section-relative addresses from 0 (baseAddress not involved).
     const labels: Record<string, number> = {};
     let addr = 0;
-    let prevFn = "";
-    for (const { fn, parsed } of parsedLines) {
-        if (fn !== prevFn) { labels[fn] = addr; prevFn = fn; }
+    let prevLabel = "";
+    for (const { label, parsed } of parsedLines) {
+        if (label !== prevLabel) { labels[label] = addr; prevLabel = label; }
         addr += worstCaseSize(parsed) * 4;
     }
 
@@ -309,8 +311,8 @@ export function assembleProgram(
     const addrToSourceIdx = new Map<number, number>();
     addr = 0;
 
-    for (const { fn, raw, parsed } of parsedLines) {
-        const assembled = assembleInstr(parsed, addr, labels, raw, fn);
+    for (const { label, raw, parsed } of parsedLines) {
+        const assembled = assembleInstr(parsed, addr, labels, raw, label);
         if (assembled instanceof RangeError) return assembled;
         const firstAddr = addr;
         const concretes: ConcreteSpec[] = [];
@@ -319,13 +321,13 @@ export function assembleProgram(
             concretes.push(spec);
             addr += 4;
         }
-        sourceInstrs.push({ fn, raw, parsed, concretes, firstAddr });
+        sourceInstrs.push({ label, raw, parsed, concretes, firstAddr });
     }
 
     // Build real section-relative label addresses from actual pass-2 positions.
     const realLabels: Record<string, number> = {};
     for (const si of sourceInstrs) {
-        if (!(si.fn in realLabels)) realLabels[si.fn] = si.firstAddr;
+        if (!(si.label in realLabels)) realLabels[si.label] = si.firstAddr;
     }
 
     // Fixup jump/branch targets using real section-relative addresses.
@@ -372,8 +374,8 @@ export function assembleProgram(
     for (const [k, v] of addrToSourceIdx) {
         absAddrToSourceIdx.set(k + prog.baseAddress, v);
     }
-    for (const fn of Object.keys(realLabels)) {
-        realLabels[fn] += prog.baseAddress;
+    for (const lbl of Object.keys(realLabels)) {
+        realLabels[lbl] += prog.baseAddress;
     }
 
     return { sourceInstrs, addrToSourceIdx: absAddrToSourceIdx, labels: realLabels };

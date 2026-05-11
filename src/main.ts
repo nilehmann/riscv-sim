@@ -178,15 +178,15 @@ function buildAsmView(assembled: AssemblyResult): void {
     const { sourceInstrs } = assembled;
     const el = document.getElementById("view-asm")!;
     let html = "";
-    let lastFn = null;
+    let lastLabel = null;
 
     for (const si of sourceInstrs) {
-        if (si.fn !== lastFn) {
-            if (lastFn !== null) {
+        if (si.label !== lastLabel) {
+            if (lastLabel !== null) {
                 html += `<div class="line"><span class="asm-addr"></span><span> </span></div>`;
             }
-            html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.fn}:</span></div>`;
-            lastFn = si.fn;
+            html += `<div class="line"><span class="asm-addr"></span><span class="lbl">${si.label}:</span></div>`;
+            lastLabel = si.label;
         }
         const tip = ` data-tooltip="${si.concretes.map((c, i) => fmtConcrete(c, si.firstAddr + i * 4)).join("&#10;")}"`;
         html += `<div class="line" id="al-${si.firstAddr.toString(16)}"${tip}><span class="pc-arrow">▶</span><span class="asm-addr">${hx(si.firstAddr)}</span><span>  ${highlightInstr(si.raw)}</span></div>`;
@@ -383,7 +383,7 @@ function buildStack(s: Step): void {
                 `<span class="slot-val" ${slotTip}>${slotVal}</span></div>`;
         }
 
-        html += `<div class="frame" id="fr-active-${fi}" data-fn="${frame.fn}">${frameSlots}</div>`;
+        html += `<div class="frame" id="fr-active-${fi}" data-label="${frame.label}">${frameSlots}</div>`;
     }
 
     // ── Bottom ghost: free zone below sp ──
@@ -463,7 +463,7 @@ function positionLabels(s: Step): void {
         if (!firstSlot) continue;
         const rect = firstSlot.getBoundingClientRect();
         const top = rect.top - colTop + rect.height / 2;
-        html += `<span class="flabel" style="top:${top}px">${frame.fn}</span>`;
+        html += `<span class="flabel" style="top:${top}px">${frame.label}</span>`;
     }
 
     labelsEl.innerHTML = html;
@@ -565,25 +565,23 @@ function loadProgram(prog: Program): void {
     const assembled = assembleProgram(prog);
     if (assembled instanceof ParseError) {
         showConfigError(
-            `Instrucción desconocida: <code>${assembled.raw}</code> en función <code>${assembled.fn}</code>.`,
+            `Instrucción desconocida: <code>${assembled.raw}</code> en etiqueta <code>${assembled.label}</code>.`,
         );
         return;
     }
     if (assembled instanceof RangeError) {
         showConfigError(
-            `Salto fuera de rango: <code>${assembled.raw}</code> en función <code>${assembled.fn}</code>.`,
+            `Salto fuera de rango: <code>${assembled.raw}</code> en etiqueta <code>${assembled.label}</code>.`,
         );
         return;
     }
 
-    // Validate that entryPoint names a defined function
-    if (!(prog.entryPoint in prog.functions)) {
+    // Validate that entryPoint names a defined label
+    if (!(prog.entryPoint in assembled.labels)) {
         buildAsmView(assembled);
         showConfigError(
-            `Punto de entrada <code>${prog.entryPoint}</code> no existe en las funciones definidas.<br><br>` +
-                `<span style="color:var(--text-dim)">Funciones disponibles: ${Object.keys(
-                    prog.functions,
-                )
+            `Punto de entrada <code>${prog.entryPoint}</code> no existe en las etiquetas definidas.<br><br>` +
+                `<span style="color:var(--text-dim)">Etiquetas disponibles: ${Object.keys(assembled.labels)
                     .map((f) => `<code>${f}</code>`)
                     .join(", ")}. ` +
                 `Ajusta <code>entryPoint</code>.</span>`,

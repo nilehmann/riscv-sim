@@ -4,7 +4,7 @@ export interface Program {
     entryPoint: string;
     initialRegs: Record<string, number>;
     baseAddress: number;
-    functions: Record<string, string[]>;
+    assembly: string;
 }
 
 export type ParsedInstr =
@@ -56,7 +56,7 @@ export class RangeError {
     readonly kind = "RangeError" as const;
     constructor(
         public readonly raw: string,
-        public readonly fn: string,
+        public readonly label: string,
     ) {}
 }
 
@@ -102,7 +102,7 @@ export type ConcreteSpec =
       };
 
 export interface SourceInstr {
-    fn: string;
+    label: string;
     raw: string;
     parsed: ParsedInstr;
     concretes: ConcreteSpec[];
@@ -116,7 +116,7 @@ export interface AssemblyResult {
 }
 
 export interface FrameInfo {
-    fn: string;
+    label: string;
     entrySpBefore: number;
     allocatedSize: number;
 }
@@ -145,6 +145,6 @@ export class ParseError {
     readonly kind = "ParseError" as const;
     constructor(
         public readonly raw: string,
-        public readonly fn: string,
+        public readonly label: string,
     ) {}
 }

@@ -7,80 +7,84 @@ export const PROGRAMS: Program[] = [
         entryPoint: "baz",
         initialRegs: { sp: 0x1000, ra: 0x8050, a0: 3, s0: 0x54 },
         baseAddress: 0x8000,
-        functions: {
-            foo: ["addi a0, a0, 1", "ret"],
-            baz: [
-                "addi sp, sp, -16",
-                "sw   ra, 12(sp)",
-                "sw   s0, 8(sp)",
-                "mv   s0, a0",
-                "li   a0, 1",
-                "call foo",
-                "add  a0, a0, s0",
-                "lw   ra, 12(sp)",
-                "lw   s0, 8(sp)",
-                "addi sp, sp, 16",
-                "ret",
-            ],
-        },
+        assembly: `\
+foo:
+    addi a0, a0, 1
+    ret
+
+baz:
+    addi sp, sp, -16
+    sw   ra, 12(sp)
+    sw   s0, 8(sp)
+    mv   s0, a0
+    li   a0, 1
+    call foo
+    add  a0, a0, s0
+    lw   ra, 12(sp)
+    lw   s0, 8(sp)
+    addi sp, sp, 16
+    ret`,
     },
     {
         name: "bar -> foo -> baz",
         entryPoint: "bar",
         initialRegs: { sp: 0x1000, ra: 0x9000, a0: 3, s0: 0x54 },
         baseAddress: 0x8000,
-        functions: {
-            baz: ["add     a0,a0,a1", "ret"],
-            foo: [
-                "addi    sp,sp,-16",
-                "sw      ra,12(sp)",
-                "li      a1,0",
-                "call    baz",
-                "addi    a0,a0,1",
-                "lw      ra,12(sp)",
-                "addi    sp,sp,16",
-                "ret",
-            ],
-            bar: [
-                "addi    sp,sp,-16",
-                "sw      ra,12(sp)",
-                "sw      s0,8(sp)",
-                "mv      s0,a0",
-                "li      a0,-1",
-                "call    foo",
-                "add     a0,a0,s0",
-                "lw      ra,12(sp)",
-                "lw      s0,8(sp)",
-                "addi    sp,sp,16",
-                "ret",
-            ],
-        },
+        assembly: `\
+baz:
+    add  a0, a0, a1
+    ret
+
+foo:
+    addi sp, sp, -16
+    sw   ra, 12(sp)
+    li   a1, 0
+    call baz
+    addi a0, a0, 1
+    lw   ra, 12(sp)
+    addi sp, sp, 16
+    ret
+
+bar:
+    addi sp, sp, -16
+    sw   ra, 12(sp)
+    sw   s0, 8(sp)
+    mv   s0, a0
+    li   a0, -1
+    call foo
+    add  a0, a0, s0
+    lw   ra, 12(sp)
+    lw   s0, 8(sp)
+    addi sp, sp, 16
+    ret`,
     },
     {
         name: "load big immediate",
         entryPoint: "foo",
         initialRegs: { sp: 0x1000, ra: 0x9000 },
         baseAddress: 0x8000,
-        functions: {
-            foo: ["li a0, 4097", "ret"],
-        },
+        assembly: `\
+foo:
+    li  a0, 4097
+    ret`,
     },
     {
         name: "forward call (bar → baz)",
         entryPoint: "bar",
         initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5 },
         baseAddress: 0x8000,
-        functions: {
-            bar: [
-                "addi sp, sp, -16",
-                "sw   ra, 12(sp)",
-                "call baz",
-                "lw   ra, 12(sp)",
-                "addi sp, sp, 16",
-                "ret",
-            ],
-            baz: ["addi a0, a0, 1", "ret"],
-        },
+        assembly: `\
+bar:
+    addi sp, sp, -16
+    sw   ra, 12(sp)
+    call baz
+    lw   ra, 12(sp)
+    addi sp, sp, 16
+    ret
+
+baz:
+    addi a0, a0, 1
+    ret`,
     },
     {
         name: "función hoja simple",
@@ -88,8 +92,9 @@ export const PROGRAMS: Program[] = [
         initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5 },
         baseAddress: 0x8000,
         cCode: `int foo(int x) {\n  return x + 1;\n}`,
-        functions: {
-            double: ["addi  a0, a0, 1", "ret"],
-        },
+        assembly: `\
+double:
+    addi a0, a0, 1
+    ret`,
     },
 ];
