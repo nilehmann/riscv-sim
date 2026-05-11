@@ -239,13 +239,11 @@ function parseInstr(raw: string): ParsedInstr | ParseError {
     const args = argStr ? argStr.split(",").map((a) => a.trim()) : [];
 
     if (op === "ret") return { op: "ret" };
-    if (op === "jalr")
-        return {
-            op: "jalr",
-            rd: args[0],
-            rs1: args[1],
-            imm: Number(args[2]),
-        };
+    if (op === "jalr") {
+        const mem = args[1] && args[1].match(/^(-?\d+)\((\w+)\)$/);
+        if (mem) return { op: "jalr", rd: args[0], rs1: mem[2], imm: Number(mem[1]) };
+        return new ParseError(raw, "");
+    }
     if (op === "call") return { op: "call", target: args[0] };
     if (op === "j") return { op: "j", target: args[0] };
     if (op === "jal")
@@ -1008,7 +1006,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
 
 // ─── Concrete instruction serializer ──────────────────────────────────────
 function fmtConcrete(c: ConcreteSpec, addr: number): string {
-    if (c.op === "jalr") return `jalr ${c.rd}, ${c.rs1}, ${c.imm}`;
+    if (c.op === "jalr") return `jalr ${c.rd}, ${c.imm}(${c.rs1})`;
     if (c.op === "jal") return `jal ${c.rd}, ${hx(addr + c.target)}`;
     if (c.op === "lui" || c.op === "auipc") return `${c.op} ${c.rd}, ${c.imm}`;
     if (
