@@ -6,13 +6,12 @@ import type {
     ConcreteInstr,
     SourceInstr,
     AssemblyResult,
-    RelocationEntry,
     Step,
     DisplayReg,
     Token,
     TokenKind,
 } from "./types";
-import { ParseError, LinkError } from "./types";
+import { ParseError, RangeError } from "./types";
 
 // ─── Programs ──────────────────────────────────────────────────────────────
 // To add a new program: append an entry to this array.
@@ -81,6 +80,23 @@ const PROGRAMS: Program[] = [
         baseAddress: 0x8000,
         functions: {
             foo: ["li a0, 4097", "ret"],
+        },
+    },
+    {
+        name: "forward call (bar → baz)",
+        entryPoint: "bar",
+        initialRegs: { sp: 0x1000, ra: 0x9000, a0: 5 },
+        baseAddress: 0x8000,
+        functions: {
+            bar: [
+                "addi sp, sp, -16",
+                "sw   ra, 12(sp)",
+                "call baz",
+                "lw   ra, 12(sp)",
+                "addi sp, sp, 16",
+                "ret",
+            ],
+            baz: ["addi a0, a0, 1", "ret"],
         },
     },
     {
@@ -341,9 +357,33 @@ function parseInstr(raw: string): ParsedInstr | ParseError {
 function assembleInstr(
     parsed: ParsedInstr,
     addr: number,
-    relocations: RelocationEntry[],
-): AssembledInstrs {
+    labels: Record<string, number>,
+    raw: string,
+    fn: string,
+): AssembledInstrs | RangeError {
     const p = parsed;
+    // JAL range: signed 21-bit offset, must be multiple of 2 → ±1 MiB
+    const JAL_MAX = (1 << 20) - 1;
+    const JAL_MIN = -(1 << 20);
+    // Branch range: signed 13-bit offset → ±4 KiB
+    const BR_MAX = (1 << 12) - 1;
+    const BR_MIN = -(1 << 12);
+
+    function resolveJalOffset(target: string): number | RangeError {
+        const labelAddr = labels[target];
+        const offset = labelAddr - addr;
+        if (offset < JAL_MIN || offset > JAL_MAX)
+            return new RangeError(raw, fn);
+        return offset;
+    }
+
+    function resolveBranchOffset(target: string): number | RangeError {
+        const labelAddr = labels[target];
+        const offset = labelAddr - addr;
+        if (offset < BR_MIN || offset > BR_MAX) return new RangeError(raw, fn);
+        return offset;
+    }
+
     switch (p.op) {
         case "ret":
             return {
@@ -361,38 +401,40 @@ function assembleInstr(
                 isPseudo: false,
             };
         case "call": {
-            relocations.push({
-                instrAddr: addr,
-                symbol: p.target,
-                type: "R_RISCV_CALL",
-            });
+            const offset = resolveJalOffset(p.target);
+            if (offset instanceof RangeError) {
+                // Offset too large for JAL: emit auipc + jalr
+                const labelAddr = labels[p.target];
+                const off = labelAddr - addr;
+                const lo = ((off & 0xfff) << 20) >> 20;
+                const hi = (off - lo) >> 12;
+                return {
+                    instrs: [
+                        { op: "auipc", rd: "ra", imm: hi },
+                        { op: "jalr", rd: "ra", rs1: "ra", imm: lo },
+                    ],
+                    isPseudo: true,
+                };
+            }
+            // Fits in JAL range: emit single jal
             return {
-                instrs: [
-                    { op: "auipc", rd: "ra", imm: 0 },
-                    { op: "jalr", rd: "ra", rs1: "ra", imm: 0 },
-                ],
+                instrs: [{ op: "jal", rd: "ra", target: offset }],
                 isPseudo: true,
             };
         }
         case "j": {
-            relocations.push({
-                instrAddr: addr,
-                symbol: p.target,
-                type: "R_RISCV_JAL",
-            });
+            const offset = resolveJalOffset(p.target);
+            if (offset instanceof RangeError) return offset;
             return {
-                instrs: [{ op: "jal", rd: "zero", target: 0 }],
+                instrs: [{ op: "jal", rd: "zero", target: offset }],
                 isPseudo: true,
             };
         }
         case "jal": {
-            relocations.push({
-                instrAddr: addr,
-                symbol: p.target,
-                type: "R_RISCV_JAL",
-            });
+            const offset = resolveJalOffset(p.target);
+            if (offset instanceof RangeError) return offset;
             return {
-                instrs: [{ op: "jal", rd: p.rd, target: 0 }],
+                instrs: [{ op: "jal", rd: p.rd, target: offset }],
                 isPseudo: false,
             };
         }
@@ -479,95 +521,143 @@ function assembleInstr(
         case "blt":
         case "bge":
         case "bltu":
-        case "bgeu":
-            relocations.push({
-                instrAddr: addr,
-                symbol: p.target,
-                type: "R_RISCV_BRANCH",
-            });
+        case "bgeu": {
+            const offset = resolveBranchOffset(p.target);
+            if (offset instanceof RangeError) return offset;
             return {
-                instrs: [{ op: p.op, rs1: p.rs1, rs2: p.rs2, target: 0 }],
+                instrs: [{ op: p.op, rs1: p.rs1, rs2: p.rs2, target: offset }],
                 isPseudo: false,
             };
+        }
         default:
             const _exhaustiveCheck: never = p;
             return _exhaustiveCheck;
     }
 }
 
-// ─── Assembler: assign addresses ──────────────────────────────────────────
-function assembleProgram(prog: Program): AssemblyResult | ParseError {
-    const sourceInstrs: SourceInstr[] = [];
-    const addrToSourceIdx = new Map<number, number>();
-    const labels: Record<string, number> = {};
-    const relocations: RelocationEntry[] = [];
-    let addr = prog.baseAddress;
+// ─── Assembler: two-pass ──────────────────────────────────────────────────
 
+// Returns the worst-case number of concrete instructions for a parsed instr.
+// Used in pass 1 to assign label addresses pessimistically.
+function worstCaseSize(parsed: ParsedInstr): number {
+    // call may collapse to 1 jal, but pessimistically assume 2 (auipc+jalr)
+    if (parsed.op === "call") return 2;
+    // li may expand to 2 (lui+addi) but that doesn't depend on labels
+    // so it doesn't affect label addresses in a way that needs pessimism here;
+    // we still count worst case to be safe
+    if (parsed.op === "li") return 2;
+    return 1;
+}
+
+type ParsedLine = { fn: string; raw: string; parsed: ParsedInstr };
+
+// Parses all instruction lines in the program and returns a flat list of
+// ParsedLine records, preserving the function each line belongs to.
+// Returns a ParseError on the first line that cannot be parsed.
+function parseProgram(prog: Program): ParsedLine[] | ParseError {
+    const parsedLines: ParsedLine[] = [];
     for (const [fn, lines] of Object.entries(prog.functions)) {
-        labels[fn] = addr;
         for (const line of lines) {
             const parsed = parseInstr(line);
             if (parsed instanceof ParseError)
                 return new ParseError(parsed.raw, fn);
-            const assembled = assembleInstr(parsed, addr, relocations);
-            const concreteSpecs: ConcreteSpec[] = assembled.instrs;
-            const firstAddr = addr;
-            const concretes: ConcreteInstr[] = [];
-            for (const spec of concreteSpecs) {
-                addrToSourceIdx.set(addr, sourceInstrs.length);
-                concretes.push({ addr, ...spec });
-                addr += 4;
-            }
-            sourceInstrs.push({
-                fn,
-                raw: line.trim(),
-                parsed,
-                concretes,
-                firstAddr,
-                isPseudo: assembled.isPseudo,
-            });
+            parsedLines.push({ fn, raw: line.trim(), parsed });
         }
     }
-    return { sourceInstrs, addrToSourceIdx, labels, relocations };
+    return parsedLines;
 }
 
-function linkProgram(result: AssemblyResult): LinkError | AssemblyResult {
-    const { relocations, labels } = result;
-    const addrToInstr = new Map<number, ConcreteInstr>();
-    for (const si of result.sourceInstrs) {
-        for (const ci of si.concretes) {
-            addrToInstr.set(ci.addr, ci);
+function assembleProgram(
+    prog: Program,
+): AssemblyResult | ParseError | RangeError {
+    // ── Pass 1: parse all instructions and assign label addresses ──────────
+    // Use worst-case sizes so label addresses are upper bounds.
+    const parsedLines = parseProgram(prog);
+    if (parsedLines instanceof ParseError) return parsedLines;
+
+    const labels: Record<string, number> = {};
+    let addr = prog.baseAddress;
+    // Walk again by function to record label addresses at function boundaries.
+    let lineIdx = 0;
+    for (const [fn, lines] of Object.entries(prog.functions)) {
+        labels[fn] = addr;
+        for (const _line of lines) {
+            addr += worstCaseSize(parsedLines[lineIdx]!.parsed) * 4;
+            lineIdx++;
         }
     }
 
-    for (const rel of relocations) {
-        const targetAddr = labels[rel.symbol];
-        if (targetAddr == null) return new LinkError(rel.symbol);
+    // ── Pass 2: assemble with known labels, compute real addresses ─────────
+    const sourceInstrs: SourceInstr[] = [];
+    const addrToSourceIdx = new Map<number, number>();
+    addr = prog.baseAddress;
 
-        switch (rel.type) {
-            case "R_RISCV_JAL": {
-                const ci = addrToInstr.get(rel.instrAddr)! as any;
-                ci.target = targetAddr;
-                break;
+    for (const { fn, raw, parsed } of parsedLines) {
+        const assembled = assembleInstr(parsed, addr, labels, raw, fn);
+        if (assembled instanceof RangeError) return assembled;
+        const concreteSpecs: ConcreteSpec[] = assembled.instrs;
+        const firstAddr = addr;
+        const concretes: ConcreteInstr[] = [];
+        for (const spec of concreteSpecs) {
+            addrToSourceIdx.set(addr, sourceInstrs.length);
+            concretes.push({ addr, ...spec });
+            addr += 4;
+        }
+        sourceInstrs.push({
+            fn,
+            raw,
+            parsed,
+            concretes,
+            firstAddr,
+            isPseudo: assembled.isPseudo,
+        });
+    }
+
+    // Build real label addresses from actual pass-2 instruction positions.
+    const realLabels: Record<string, number> = {};
+    for (const si of sourceInstrs) {
+        if (!(si.fn in realLabels)) realLabels[si.fn] = si.firstAddr;
+    }
+
+    // Fixup jump/branch targets: pass-2 stored `labels[target] - addr` using
+    // pessimistic pass-1 labels; patch to use real addresses instead.
+    const BRANCH_OPS = new Set([
+        "beq", "bne", "blt", "bge", "bltu", "bgeu",
+    ]);
+    for (const si of sourceInstrs) {
+        const p = si.parsed;
+        if (
+            p.op === "call" ||
+            p.op === "jal" ||
+            p.op === "j"
+        ) {
+            const realAddr = realLabels[p.target];
+            if (realAddr == null) continue;
+            if (si.concretes.length === 1) {
+                const ci = si.concretes[0]!;
+                if (ci.op === "jal")
+                    (ci as { target: number }).target = realAddr - ci.addr;
+            } else if (si.concretes.length === 2) {
+                const auipc = si.concretes[0]!;
+                const jalr = si.concretes[1]!;
+                if (auipc.op === "auipc" && jalr.op === "jalr") {
+                    const off = realAddr - auipc.addr;
+                    const lo = ((off & 0xfff) << 20) >> 20;
+                    const hi = (off - lo) >> 12;
+                    (auipc as { imm: number }).imm = hi;
+                    (jalr as { imm: number }).imm = lo;
+                }
             }
-            case "R_RISCV_BRANCH": {
-                const ci = addrToInstr.get(rel.instrAddr)! as any;
-                ci.target = targetAddr;
-                break;
-            }
-            case "R_RISCV_CALL": {
-                const auipc = addrToInstr.get(rel.instrAddr)! as any;
-                const jalr = addrToInstr.get(rel.instrAddr + 4)! as any;
-                const offset = targetAddr - rel.instrAddr;
-                const lo12 = ((offset & 0xfff) << 20) >> 20;
-                const hi20 = (offset - lo12) >> 12;
-                auipc.imm = hi20;
-                jalr.imm = lo12;
-                break;
-            }
+        } else if (BRANCH_OPS.has(p.op)) {
+            const target = (p as { target: string }).target;
+            const realAddr = realLabels[target];
+            if (realAddr == null) continue;
+            const ci = si.concretes[0]!;
+            (ci as { target: number }).target = realAddr - ci.addr;
         }
     }
-    return result;
+
+    return { sourceInstrs, addrToSourceIdx, labels: realLabels };
 }
 
 // ─── Syntax highlighter ───────────────────────────────────────────────────
@@ -900,7 +990,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                         syncFpS0(ci.rd);
                         hiReg.push(ci.rd);
                     }
-                    pc = ci.target;
+                    pc = ci.addr + ci.target;
                     break;
                 }
 
@@ -963,7 +1053,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
                         regs[ci.rs1],
                         regs[ci.rs2],
                     );
-                    pc = taken ? ci.target : pc + 4;
+                    pc = taken ? ci.addr + ci.target : pc + 4;
                     break;
                 }
 
@@ -983,7 +1073,7 @@ function simulate(prog: Program, assembled: AssemblyResult): Step[] {
 // ─── Concrete instruction serializer ──────────────────────────────────────
 function fmtConcrete(c: ConcreteInstr): string {
     if (c.op === "jalr") return `jalr ${c.rd}, ${c.rs1}, ${c.imm}`;
-    if (c.op === "jal") return `jal ${c.rd}, ${hx(c.target)}`;
+    if (c.op === "jal") return `jal ${c.rd}, ${hx(c.addr + c.target)}`;
     if (c.op === "lui" || c.op === "auipc") return `${c.op} ${c.rd}, ${c.imm}`;
     if (
         (
@@ -1041,7 +1131,7 @@ function fmtConcrete(c: ConcreteInstr): string {
             rs2: string;
             target: number;
         };
-        return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${hx(ci.target)}`;
+        return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${hx(c.addr + ci.target)}`;
     }
     return c.op;
 }
@@ -1431,11 +1521,10 @@ function loadProgram(prog: Program): void {
         );
         return;
     }
-
-    const linked = linkProgram(assembled);
-    if (linked instanceof LinkError) {
-        buildAsmView(assembled);
-        showConfigError(`Símbolo no resuelto: <code>${linked.symbol}</code>.`);
+    if (assembled instanceof RangeError) {
+        showConfigError(
+            `Salto fuera de rango: <code>${assembled.raw}</code> en función <code>${assembled.fn}</code>.`,
+        );
         return;
     }
 

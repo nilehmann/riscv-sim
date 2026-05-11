@@ -52,24 +52,19 @@ export type ParsedInstr =
           target: string;
       };
 
-export type RelocationType = "R_RISCV_JAL" | "R_RISCV_BRANCH" | "R_RISCV_CALL";
-
-export interface RelocationEntry {
-    instrAddr: number;
-    symbol: string;
-    type: RelocationType;
-}
-
-export class LinkError {
-    readonly kind = "LinkError" as const;
-    constructor(public readonly symbol: string) {}
+export class RangeError {
+    readonly kind = "RangeError" as const;
+    constructor(
+        public readonly raw: string,
+        public readonly fn: string,
+    ) {}
 }
 
 export type ConcreteSpec =
     | { op: "ret" }
     | { op: "jalr"; rd: string; rs1: string; imm: number }
     | { op: "lui" | "auipc"; rd: string; imm: number }
-    | { op: "jal"; rd: string; target: number } // 0 pre-link, resolved address post-link
+    | { op: "jal"; rd: string; target: number } // PC-relative offset
     | {
           op: "addi" | "slli" | "srli" | "srai" | "andi" | "ori" | "xori";
           rd: string;
@@ -104,7 +99,7 @@ export type ConcreteSpec =
           op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu";
           rs1: string;
           rs2: string;
-          target: number; // 0 pre-link, resolved address post-link
+          target: number; // PC-relative offset
       };
 
 export type ConcreteInstr = ConcreteSpec & { addr: number };
@@ -128,7 +123,6 @@ export interface AssemblyResult {
     sourceInstrs: SourceInstr[];
     addrToSourceIdx: Map<number, number>;
     labels: Record<string, number>;
-    relocations: RelocationEntry[];
 }
 
 export interface FrameInfo {
