@@ -302,6 +302,13 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
                 case "jal": {
                     machine.writeReg(ci.rd, ciAddr + 4);
                     if (ci.rd !== "zero") hiReg.push(ci.rd);
+                    if (si.parsed.op === "call") {
+                        callStack.push({
+                            label: (si.parsed as any).target,
+                            entrySpBefore: machine.regs.sp,
+                            allocatedSize: 0,
+                        });
+                    }
                     pc = ciAddr + ci.target;
                     break;
                 }
