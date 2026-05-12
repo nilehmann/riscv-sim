@@ -183,4 +183,17 @@ foo:
         jr      ra
       `,
   },
+  {
+    name: "Conditional jump",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0 },
+    baseAddress: 0x8000,
+    assembly: `\
+foo:
+    beq a0, zero, .L0
+    addi a0, a0, 1
+.L0:
+    addi a0, a0, 2
+    ret`,
+  },
 ];
