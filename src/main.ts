@@ -416,8 +416,11 @@ function render(s: Step): void {
             val != null
                 ? `data-tooltip="sin signo: ${val >>> 0}&#10;con signo: ${val | 0}"`
                 : "";
+        const nameLine = r.key === "s0"
+            ? `<div class="reg-row-name-line"><span class="reg-name">${r.name}</span><button class="fp-pill${_showFp ? " active" : ""}" id="fp-pill">fp</button></div>`
+            : `<span class="reg-name">${r.name}</span>`;
         return `<div class="reg-row${hiR.has(r.name) ? " hi" : ""}">
-  <span class="reg-name">${r.name}</span>
+  ${nameLine}
   <span class="reg-val" ${tip}>${fmtRegVal(r.key, val)}</span>
   <span class="reg-desc">${r.desc}</span>
 </div>`;
@@ -429,6 +432,7 @@ function render(s: Step): void {
         positionSpArrow(s);
         positionLabels(s);
         positionOffsets(s);
+        if (_showFp) positionFpArrow(s);
     });
 
     // Controls — mode-aware position and total
@@ -541,6 +545,8 @@ function buildStack(s: Step): void {
 
 // ─── SP arrow ─────────────────────────────────────────────────────────────
 let _firstArrowRender = true;
+let _showFp = false;
+let _firstFpArrowRender = true;
 
 function positionSpArrow(s: Step): void {
     const arrow = document.getElementById("sp-arrow");
@@ -572,6 +578,36 @@ function positionSpArrow(s: Step): void {
         arrow.getBoundingClientRect(); // force reflow before re-enabling transition
         arrow.style.transition = "";
         _firstArrowRender = false;
+    } else {
+        arrow.style.top = top + "px";
+    }
+}
+
+// ─── FP arrow ─────────────────────────────────────────────────────────────
+function positionFpArrow(s: Step): void {
+    const arrow = document.getElementById("fp-arrow");
+    const wrapper = document.getElementById("stack-wrapper");
+    if (!arrow || !wrapper) return;
+
+    const fpAddr = s.regs ? s.regs.s0 : 0;
+    let target = document.getElementById("slot-" + fpAddr.toString(16));
+    if (!target) {
+        const callerBase = s.callStack && s.callStack.length > 0
+            ? s.callStack[0].entrySpBefore : fpAddr;
+        target = document.getElementById("slot-" + callerBase.toString(16));
+    }
+    if (!target) return;
+
+    const wRect = wrapper.getBoundingClientRect();
+    const tRect = target.getBoundingClientRect();
+    const top = tRect.top - wRect.top + tRect.height / 2;
+
+    if (_firstFpArrowRender) {
+        arrow.style.transition = "none";
+        arrow.style.top = top + "px";
+        arrow.getBoundingClientRect();
+        arrow.style.transition = "";
+        _firstFpArrowRender = false;
     } else {
         arrow.style.top = top + "px";
     }
@@ -867,6 +903,7 @@ sel.addEventListener("change", () =>
 document.getElementById("stack-area")!.innerHTML = `
   <div class="stack-wrapper" id="stack-wrapper">
     <div class="offset-arrows" id="offset-arrows"></div>
+    <div class="fp-arrow" id="fp-arrow" style="display:none"><span class="fp-label">fp</span><span class="fp-arrow-shaft"></span><span class="fp-arrow-head"></span></div>
     <div class="sp-arrow" id="sp-arrow"><span class="sp-label">sp</span><span class="sp-arrow-shaft"></span><span class="sp-arrow-head"></span></div>
     <div class="stack-column" id="stack-column"></div>
     <div class="frame-labels" id="frame-labels"></div>
@@ -916,6 +953,14 @@ document.addEventListener("mousemove", (e) => {
 });
 
 // ─── Button event listeners (replaces inline onclick attributes) ───────────
+document.getElementById("reg-list")!.addEventListener("click", (e) => {
+    if (!(e.target as Element).closest("#fp-pill")) return;
+    _showFp = !_showFp;
+    _firstFpArrowRender = true;
+    const arrow = document.getElementById("fp-arrow")!;
+    arrow.style.display = _showFp ? "flex" : "none";
+    render(STEPS[cur]!);
+});
 document.getElementById("btn-prev")!.addEventListener("click", () => go(-1));
 document.getElementById("btn-next")!.addEventListener("click", () => go(1));
 document.getElementById("btn-mode-source")!.addEventListener("click", () => switchAsmMode("source"));
