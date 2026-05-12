@@ -126,38 +126,31 @@ foo:
   {
     name: "Dynamic array",
     entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 3 },
     baseAddress: 0x8000,
     cCode: `\
-int baz(int n) {
+void foo(int n) {
   int arr[n];
-  return arr[0];
-}
-
-int foo() {
-  baz(3);
+  arr[0] = 42;
 }
     `,
     assembly: `\
-baz:
-  addi    sp,sp,-16
-  sw      ra,12(sp)
-  sw      s0,8(sp)
-  addi    s0,sp,16
-  slli    a0,a0,2
-  addi    a0,a0,15
-  andi    a0,a0,-16
-  sub     sp,sp,a0
-  lw      a0,0(sp)
-  addi    sp,s0,-16
-  lw      ra,12(sp)
-  lw      s0,8(sp)
-  addi    sp,sp,16
-  jr      ra
-foo:
-  li      a0,3
-  call    baz
-  ret`,
+  foo:
+      addi    sp, sp, -16
+      sw      ra, 12(sp)
+      sw      s0, 8(sp)
+      addi    s0, sp, 16
+      slli    a5, a0, 2
+      addi    a5, a5, 15
+      andi    a5, a5, -16
+      sub     sp, sp, a5
+      li      a4, 42
+      sw      a4, 0(sp)
+      addi    sp, s0, -16
+      lw      ra, 12(sp)
+      lw      s0, 8(sp)
+      addi    sp, sp, 16
+      jr      ra`,
   },
   {
     name: "Store a byte",

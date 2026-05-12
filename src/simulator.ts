@@ -341,6 +341,17 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
                     machine.writeReg(ci.rd, val);
                     pc += 4;
                     hiReg.push(ci.rd);
+                    if (ci.rd === "sp") {
+                        let top = null;
+                        for (let i = callStack.length - 1; i >= 0; i--) {
+                            if (callStack[i].label === si.label) {
+                                top = callStack[i];
+                                break;
+                            }
+                        }
+                        if (!top) top = callStack[callStack.length - 1];
+                        top.allocatedSize = top.entrySpBefore - val;
+                    }
                     break;
                 }
 
