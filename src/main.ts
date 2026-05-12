@@ -493,7 +493,15 @@ function buildStack(s: Step): void {
         let frameSlots = "";
         for (let addr = frameTop - 4; addr >= frameBot; addr -= 4) {
             const label = s.slotLabels && s.slotLabels.get(addr);
-            const val = s.mem && s.mem.get(addr);
+            // Prefer a direct word-sized entry; fall back to a byte/halfword entry
+            // within this word's range so sub-word stores stay visible.
+            let val = s.mem && s.mem.get(addr);
+            if (val === undefined && s.mem) {
+                for (let b = 1; b < 4; b++) {
+                    const bVal = s.mem.get(addr + b);
+                    if (bVal !== undefined) { val = bVal; break; }
+                }
+            }
             const slotName = label
                 ? `${hx(addr)}&nbsp;&nbsp;${label}`
                 : hx(addr);

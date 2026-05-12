@@ -98,29 +98,96 @@ foo:
     ret`,
   },
   {
-    name: "hola",
+    name: "Static array",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },
     baseAddress: 0x8000,
     cCode: `\
-    int foo(int i) {
-      int arr[] = {0, 1, 2};
-      return arr[i];
-    }
+int foo(int i) {
+  int arr[] = {0, 1, 2};
+  return arr[i];
+}
     `,
     assembly: `\
-    foo:
-        addi    sp,sp,-16
-        sw      zero,4(sp)
-        li      a5,1
-        sw      a5,8(sp)
-        li      a5,2
-        sw      a5,12(sp)
-        slli    a0,a0,2
-        addi    a5,sp,16
-        add     a0,a5,a0
-        lw      a0,-12(a0)
-        addi    sp,sp,16
-        jr      ra`,
+foo:
+  addi    sp,sp,-16
+  sw      zero,4(sp)
+  li      a5,1
+  sw      a5,8(sp)
+  li      a5,2
+  sw      a5,12(sp)
+  slli    a0,a0,2
+  addi    a5,sp,16
+  add     a0,a5,a0
+  lw      a0,-12(a0)
+  addi    sp,sp,16
+  jr      ra`,
+  },
+  {
+    name: "Dynamic array",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },
+    baseAddress: 0x8000,
+    cCode: `\
+int baz(int n) {
+  int arr[n];
+  return arr[0];
+}
+
+int foo() {
+  baz(3);
+}
+    `,
+    assembly: `\
+baz:
+  addi    sp,sp,-16
+  sw      ra,12(sp)
+  sw      s0,8(sp)
+  addi    s0,sp,16
+  slli    a0,a0,2
+  addi    a0,a0,15
+  andi    a0,a0,-16
+  sub     sp,sp,a0
+  lw      a0,0(sp)
+  addi    sp,s0,-16
+  lw      ra,12(sp)
+  lw      s0,8(sp)
+  addi    sp,sp,16
+  jr      ra
+foo:
+  li      a0,3
+  call    baz
+  ret`,
+  },
+  {
+    name: "Store a byte",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
+    baseAddress: 0x8000,
+    cCode: `\
+int baz(char *c) {
+    return *c;
+}
+
+int foo() {
+  char c = 42;
+  return baz(&c);
+}
+`,
+    assembly: `\
+baz:
+        lbu     a0,0(a0)
+        ret
+foo:
+        addi    sp,sp,-32
+        sw      ra,28(sp)
+        li      a5,42
+        sb      a5,15(sp)
+        addi    a0,sp,15
+        call    baz
+        lw      ra,28(sp)
+        addi    sp,sp,32
+        jr      ra
+      `,
   },
 ];

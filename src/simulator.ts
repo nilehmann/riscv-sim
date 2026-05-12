@@ -157,6 +157,11 @@ export class Machine {
         this.mem.set(addr, value);
     }
 
+    writeMemSized(addr: number, value: number, bytes: 1 | 2 | 4): void {
+        const mask = bytes === 1 ? 0xFF : bytes === 2 ? 0xFFFF : 0xFFFFFFFF;
+        this.mem.set(addr, value & mask);
+    }
+
     readMem(addr: number): number {
         if (this.mem.has(addr)) return this.mem.get(addr)!;
         if (this.osMode) {
@@ -166,6 +171,16 @@ export class Machine {
             return v;
         }
         return 0;
+    }
+
+    readMemSized(addr: number, bytes: 1 | 2 | 4, signed: boolean): number {
+        const raw = this.readMem(addr);
+        if (bytes === 4) return raw;
+        const mask = bytes === 1 ? 0xFF : 0xFFFF;
+        const val = raw & mask;
+        if (!signed) return val;
+        const shift = (4 - bytes) * 8;
+        return (val << shift) >> shift;
     }
 
     snapshot(): { regs: Record<string, number>; mem: Map<number, number> } {
@@ -380,10 +395,12 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
                         segfault(addr, ciAddr);
                         return { steps, sourceToConcrete };
                     }
-                    machine.writeMem(addr, machine.regs[ci.rs2]);
-                    slotLabels.set(addr, ci.rs2);
+                    const storeBytes = ci.op === "sb" ? 1 : ci.op === "sh" ? 2 : 4;
+                    machine.writeMemSized(addr, machine.regs[ci.rs2], storeBytes as 1 | 2 | 4);
+                    const storeDisplayAddr = storeBytes < 4 ? addr & ~3 : addr;
+                    slotLabels.set(storeDisplayAddr, ci.rs2);
                     pc += 4;
-                    hiSlots.push(addr);
+                    hiSlots.push(storeDisplayAddr);
                     break;
                 }
 
@@ -397,10 +414,13 @@ export function simulate(prog: Program, assembled: AssemblyResult): SimulateResu
                         segfault(addr, ciAddr);
                         return { steps, sourceToConcrete };
                     }
-                    machine.writeReg(ci.rd, machine.readMem(addr));
+                    const loadBytes = (ci.op === "lb" || ci.op === "lbu") ? 1
+                        : (ci.op === "lh" || ci.op === "lhu") ? 2 : 4;
+                    const loadSigned = ci.op === "lb" || ci.op === "lh";
+                    machine.writeReg(ci.rd, machine.readMemSized(addr, loadBytes as 1 | 2 | 4, loadSigned));
                     pc += 4;
                     hiReg.push(ci.rd);
-                    hiSlots.push(addr);
+                    hiSlots.push(loadBytes < 4 ? addr & ~3 : addr);
                     break;
                 }
 
