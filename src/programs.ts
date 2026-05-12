@@ -59,14 +59,33 @@ bar:
     ret`,
   },
   {
-    name: "load big immediate",
+    name: "Local variable",
     entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },
     baseAddress: 0x8000,
+    cCode: `\
+int baz(int *n) {
+    return *n;
+}
+
+int foo() {
+  int x = 42;
+  return baz(&x);
+}`,
     assembly: `\
+baz:
+  lw      a0,0(a0)
+  ret
 foo:
-    li  a0, 4097
-    ret`,
+  addi    sp,sp,-32
+  sw      ra,28(sp)
+  li      a5,42
+  sw      a5,12(sp)
+  addi    a0,sp,12
+  call    baz
+  lw      ra,28(sp)
+  addi    sp,sp,32
+  jr      ra`,
   },
   {
     name: "Static array",
@@ -124,6 +143,29 @@ void foo(int n) {
       jr      ra`,
   },
   {
+    name: "load big immediate",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
+    baseAddress: 0x8000,
+    assembly: `\
+foo:
+    li  a0, 4097
+    ret`,
+  },
+  {
+    name: "Conditional jump",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0 },
+    baseAddress: 0x8000,
+    assembly: `\
+foo:
+    beq a0, zero, .L0
+    addi a0, a0, 1
+.L0:
+    addi a0, a0, 2
+    ret`,
+  },
+  {
     name: "Store a byte",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
@@ -153,18 +195,5 @@ foo:
         addi    sp,sp,32
         jr      ra
       `,
-  },
-  {
-    name: "Conditional jump",
-    entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0 },
-    baseAddress: 0x8000,
-    assembly: `\
-foo:
-    beq a0, zero, .L0
-    addi a0, a0, 1
-.L0:
-    addi a0, a0, 2
-    ret`,
   },
 ];
