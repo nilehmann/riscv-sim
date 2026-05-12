@@ -10,7 +10,7 @@ import { ParseError, RangeError, OverlapError, ConfigError } from "./types";
 import { hx, assembleProgram, fmtConcreteRel } from "./assembler";
 import { ALL_REGS, REG_META, REG_SET, simulate } from "./simulator";
 import { PROGRAMS } from "./programs";
-import { createIcons, Info } from "lucide";
+import { createIcons, ChevronDown, Info } from "lucide";
 
 const INSTR_INFO_ICON = `<i data-lucide="info"></i>`;
 
@@ -281,7 +281,7 @@ function buildAssembledView(assembled: AssemblyResult): void {
         }
     }
 
-    createIcons({ icons: { Info }, attrs: { width: "13", height: "13" } });
+    createIcons({ icons: { Info, ChevronDown }, attrs: { width: "13", height: "13" } });
 }
 
 // ─── Build assembly view ───────────────────────────────────────────────────
@@ -310,7 +310,7 @@ function buildAsmView(assembled: AssemblyResult): void {
         el.appendChild(line);
     }
 
-    createIcons({ icons: { Info }, attrs: { width: "13", height: "13" } });
+    createIcons({ icons: { Info, ChevronDown }, attrs: { width: "13", height: "13" } });
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────
@@ -888,16 +888,29 @@ bar.addEventListener("pointerup", (e) => {
 });
 
 // Populate program selector
-const sel = document.getElementById("prog-select") as HTMLSelectElement;
-PROGRAMS.forEach((p, i) => {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = p.name;
-    sel.appendChild(opt);
+const selBtn = document.getElementById("prog-select-btn") as HTMLButtonElement;
+const selLabel = document.getElementById("prog-select-label") as HTMLSpanElement;
+const selList = document.getElementById("prog-select-list") as HTMLUListElement;
+PROGRAMS.forEach((p) => {
+    const li = document.createElement("li");
+    li.textContent = p.name;
+    li.addEventListener("click", () => {
+        selLabel.textContent = p.name;
+        selList.classList.remove("open");
+        loadProgram(p);
+    });
+    selList.appendChild(li);
 });
-sel.addEventListener("change", () =>
-    loadProgram(PROGRAMS[parseInt(sel.value)]!),
-);
+selLabel.textContent = PROGRAMS[0]!.name;
+createIcons({ icons: { ChevronDown }, attrs: { width: "14", height: "14" } });
+selBtn.addEventListener("click", () => {
+    selList.classList.toggle("open");
+});
+document.addEventListener("click", (e) => {
+    if (!(e.target as Element).closest("#prog-select-wrapper")) {
+        selList.classList.remove("open");
+    }
+});
 
 // Build persistent stack skeleton (arrow + column + labels)
 document.getElementById("stack-area")!.innerHTML = `

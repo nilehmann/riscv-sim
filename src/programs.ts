@@ -69,35 +69,6 @@ foo:
     ret`,
   },
   {
-    name: "forward call (bar → baz)",
-    entryPoint: "bar",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 5 },
-    baseAddress: 0x8000,
-    assembly: `\
-bar:
-    addi sp, sp, -16
-    sw   ra, 12(sp)
-    call baz
-    lw   ra, 12(sp)
-    addi sp, sp, 16
-    ret
-
-baz:
-    addi a0, a0, 1
-    ret`,
-  },
-  {
-    name: "función hoja simple",
-    entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 5 },
-    baseAddress: 0x8000,
-    cCode: `int foo(int x) {\n  return x + 1;\n}`,
-    assembly: `\
-foo:
-    addi a0, a0, 1
-    ret`,
-  },
-  {
     name: "Static array",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },

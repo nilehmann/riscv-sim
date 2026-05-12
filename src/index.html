@@ -77,7 +77,13 @@
         </div>
 
         <div class="controls">
-            <select class="btn" id="prog-select"></select>
+            <div class="custom-select" id="prog-select-wrapper">
+                <button class="btn" id="prog-select-btn">
+                    <span id="prog-select-label"></span>
+                    <i data-lucide="chevron-down"></i>
+                </button>
+                <ul class="custom-select-list" id="prog-select-list"></ul>
+            </div>
             <span class="step-counter" id="step-counter">0 / 0</span>
             <div class="progress-bar">
                 <div
