@@ -21,11 +21,10 @@
   },
   "homepage": "https://github.com/nilehmann/riscv-sim#readme",
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "svelte": "^5.55.5",
     "typescript": "^6.0.3",
     "vite": "^8.0.11",
     "vite-plugin-singlefile": "^2.3.3"
-  },
-  "dependencies": {
-    "lucide": "^1.14.0"
   }
 }
