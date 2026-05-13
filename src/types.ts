@@ -1,3 +1,44 @@
+export const ALL_REGS = [
+  "zero",
+  "ra",
+  "sp",
+  "gp",
+  "tp",
+  "a0",
+  "a1",
+  "a2",
+  "a3",
+  "a4",
+  "a5",
+  "a6",
+  "a7",
+  "s0",
+  "s1",
+  "s2",
+  "s3",
+  "s4",
+  "s5",
+  "s6",
+  "s7",
+  "s8",
+  "s9",
+  "s10",
+  "s11",
+  "t0",
+  "t1",
+  "t2",
+  "t3",
+  "t4",
+  "t5",
+  "t6",
+] as const;
+
+export type Reg = (typeof ALL_REGS)[number];
+
+export function isReg(s: string): s is Reg {
+  return (ALL_REGS as readonly string[]).includes(s);
+}
+
 export interface Program {
   name: string;
   cCode?: string;
@@ -14,16 +55,16 @@ export interface Program {
 export type ParsedInstr =
   | { op: "ret" }
   | { op: "nop" }
-  | { op: "jalr"; rd: string; rs1: string; imm: number }
+  | { op: "jalr"; rd: Reg; rs1: Reg; imm: number }
   | { op: "call" | "j"; target: string }
-  | { op: "jal"; rd: string; target: string }
-  | { op: "jr"; rs: string }
-  | { op: "li" | "lui"; rd: string; imm: number }
-  | { op: "mv" | "neg"; rd: string; rs1: string }
+  | { op: "jal"; rd: Reg; target: string }
+  | { op: "jr"; rs: Reg }
+  | { op: "li" | "lui"; rd: Reg; imm: number }
+  | { op: "mv" | "neg"; rd: Reg; rs1: Reg }
   | {
       op: "addi" | "slli" | "srli" | "srai" | "andi" | "ori" | "xori";
-      rd: string;
-      rs1: string;
+      rd: Reg;
+      rs1: Reg;
       imm: number;
     }
   | {
@@ -39,21 +80,21 @@ export type ParsedInstr =
         | "sll"
         | "srl"
         | "sra";
-      rd: string;
-      rs1: string;
-      rs2: string;
+      rd: Reg;
+      rs1: Reg;
+      rs2: Reg;
     }
-  | { op: "sw" | "sh" | "sb"; rs2: string; offset: number; rs1: string }
+  | { op: "sw" | "sh" | "sb"; rs2: Reg; offset: number; rs1: Reg }
   | {
       op: "lw" | "lh" | "lb" | "lhu" | "lbu";
-      rd: string;
+      rd: Reg;
       offset: number;
-      rs1: string;
+      rs1: Reg;
     }
   | {
       op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu";
-      rs1: string;
-      rs2: string;
+      rs1: Reg;
+      rs2: Reg;
       target: string;
     };
 
@@ -79,13 +120,13 @@ export class RangeError {
 }
 
 export type ConcreteSpec =
-  | { op: "jalr"; rd: string; rs1: string; imm: number }
-  | { op: "lui" | "auipc"; rd: string; imm: number }
-  | { op: "jal"; rd: string; target: number } // PC-relative offset
+  | { op: "jalr"; rd: Reg; rs1: Reg; imm: number }
+  | { op: "lui" | "auipc"; rd: Reg; imm: number }
+  | { op: "jal"; rd: Reg; target: number } // PC-relative offset
   | {
       op: "addi" | "slli" | "srli" | "srai" | "andi" | "ori" | "xori";
-      rd: string;
-      rs1: string;
+      rd: Reg;
+      rs1: Reg;
       imm: number;
     }
   | {
@@ -101,21 +142,21 @@ export type ConcreteSpec =
         | "sll"
         | "srl"
         | "sra";
-      rd: string;
-      rs1: string;
-      rs2: string;
+      rd: Reg;
+      rs1: Reg;
+      rs2: Reg;
     }
   | {
       op: "lw" | "lh" | "lb" | "lhu" | "lbu";
-      rd: string;
+      rd: Reg;
       offset: number;
-      rs1: string;
+      rs1: Reg;
     }
-  | { op: "sw" | "sh" | "sb"; rs2: string; offset: number; rs1: string }
+  | { op: "sw" | "sh" | "sb"; rs2: Reg; offset: number; rs1: Reg }
   | {
       op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu";
-      rs1: string;
-      rs2: string;
+      rs1: Reg;
+      rs2: Reg;
       target: number; // PC-relative offset
     };
 
@@ -170,5 +211,7 @@ export class ParseError {
   constructor(
     public readonly raw: string,
     public readonly label: string,
+    /** A human-readable description of why parsing failed, if known. */
+    public readonly message?: string,
   ) {}
 }

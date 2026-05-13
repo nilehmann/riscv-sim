@@ -1,76 +1,18 @@
-import type { Program, AssemblyResult, Step, SimulateResult } from "./types";
+import type {
+  Program,
+  AssemblyResult,
+  Step,
+  SimulateResult,
+  Reg,
+} from "./types";
+import { ALL_REGS, isReg } from "./types";
 
 // ─── Register metadata ────────────────────────────────────────────────────
-export const ALL_REGS = [
-  "zero",
-  "ra",
-  "sp",
-  "gp",
-  "tp",
-  "a0",
-  "a1",
-  "a2",
-  "a3",
-  "a4",
-  "a5",
-  "a6",
-  "a7",
-  "s0",
-  "s1",
-  "s2",
-  "s3",
-  "s4",
-  "s5",
-  "s6",
-  "s7",
-  "s8",
-  "s9",
-  "s10",
-  "s11",
-  "t0",
-  "t1",
-  "t2",
-  "t3",
-  "t4",
-  "t5",
-  "t6",
-];
+// ALL_REGS and Reg are defined in types.ts — imported and re-exported for consumers
+export { ALL_REGS } from "./types";
 
-export const REG_SET = new Set([
-  "zero",
-  "ra",
-  "sp",
-  "gp",
-  "tp",
-  "fp",
-  "a0",
-  "a1",
-  "a2",
-  "a3",
-  "a4",
-  "a5",
-  "a6",
-  "a7",
-  "s0",
-  "s1",
-  "s2",
-  "s3",
-  "s4",
-  "s5",
-  "s6",
-  "s7",
-  "s8",
-  "s9",
-  "s10",
-  "s11",
-  "t0",
-  "t1",
-  "t2",
-  "t3",
-  "t4",
-  "t5",
-  "t6",
-]);
+// fp is an alias for s0 (x8) — included so assembly using `fp` is highlighted correctly
+export const REG_SET = new Set([...ALL_REGS, "fp"]);
 
 export const REG_META = {
   zero: { desc: "constante cero" },
@@ -119,7 +61,7 @@ function garbageValue(addr: number): number {
 }
 
 export class Machine {
-  regs: Record<string, number>;
+  regs: Record<Reg, number>;
   mem: Map<number, number>;
   readonly stackBase: number;
   readonly osMode: boolean;
@@ -129,9 +71,14 @@ export class Machine {
     stackBase: number,
     osMode: boolean,
   ) {
-    this.regs = {};
-    for (const r of ALL_REGS) this.regs[r] = 0;
-    for (const [k, v] of Object.entries(initialRegs)) this.regs[k] = v;
+    this.regs = Object.fromEntries(ALL_REGS.map((r) => [r, 0])) as Record<
+      Reg,
+      number
+    >;
+    for (const [k, v] of Object.entries(initialRegs)) {
+      const r = k === "fp" ? "s0" : k;
+      if (isReg(r)) this.regs[r] = v;
+    }
     this.mem = new Map();
     this.stackBase = stackBase;
     this.osMode = osMode;
@@ -144,9 +91,9 @@ export class Machine {
   }
 
   writeReg(name: string, value: number): void {
-    if (name === "zero") return; // zero is hardwired to 0
-    // fp is an alias for s0 (x8) — normalize to s0
-    this.regs[name === "fp" ? "s0" : name] = value;
+    if (name === "zero") return;
+    const r = name === "fp" ? "s0" : name;
+    if (isReg(r)) this.regs[r] = value;
   }
 
   writeMem(addr: number, value: number): void {

@@ -199,8 +199,22 @@
         <div class="config-error">
             <div class="config-error-title">Error de configuración</div>
             {#if e.kind === "ParseError"}
-                Instrucción desconocida: <code>{e.raw}</code> en etiqueta
-                <code>{e.label}</code>.
+                {#if e.message}
+                    {e.message} en instrucción
+                    <code>{e.raw}</code>{#if e.label}, etiqueta <code
+                            >{e.label}</code
+                        >{/if}.<br /><br />
+                    <span style="color:var(--text-dim)"
+                        >Los registros válidos son: <code>x0</code>–<code
+                            >x31</code
+                        >
+                        y sus alias (<code>zero</code>, <code>ra</code>,
+                        <code>sp</code>, <code>a0</code>–<code>a7</code>, etc.).</span
+                    >
+                {:else}
+                    Instrucción desconocida: <code>{e.raw}</code>{#if e.label},
+                        etiqueta <code>{e.label}</code>{/if}.
+                {/if}
             {:else if e.kind === "RangeError"}
                 Salto fuera de rango: <code>{e.raw}</code> en etiqueta
                 <code>{e.label}</code>.
