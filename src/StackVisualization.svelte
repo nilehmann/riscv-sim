@@ -197,53 +197,12 @@
     {#if sim.loadError}
         {@const e = sim.loadError}
         <div class="config-error">
-            <div class="config-error-title">Error de configuración</div>
-            {#if e.kind === "ParseError"}
-                {#if e.message}
-                    {e.message} en instrucción
-                    <code>{e.raw}</code>{#if e.label}, etiqueta <code
-                            >{e.label}</code
-                        >{/if}.<br /><br />
-                    <span style="color:var(--text-dim)"
-                        >Los registros válidos son: <code>x0</code>–<code
-                            >x31</code
-                        >
-                        y sus alias (<code>zero</code>, <code>ra</code>,
-                        <code>sp</code>, <code>a0</code>–<code>a7</code>, etc.).</span
-                    >
-                {:else}
-                    Instrucción desconocida: <code>{e.raw}</code>{#if e.label},
-                        etiqueta <code>{e.label}</code>{/if}.
-                {/if}
-            {:else if e.kind === "RangeError"}
-                Salto fuera de rango: <code>{e.raw}</code> en etiqueta
-                <code>{e.label}</code>.
-            {:else if e.kind === "ConfigError"}
-                {@html e.message}
-            {:else if e.kind === "OverlapError"}
-                El código termina en <code>{hx(e.codeEnd)}</code>, que supera la
-                base del stack <code>{hx(e.stackBase)}</code>.<br /><br />
-                <span style="color:var(--text-dim)"
-                    >Reduce <code>baseAddress</code> o ajusta
-                    <code>stackBase</code>.</span
-                >
-            {:else if e.kind === "BadEntryPoint"}
-                Punto de entrada <code>{e.entryPoint}</code> no existe en las
-                etiquetas definidas.<br /><br />
-                <span style="color:var(--text-dim)"
-                    >Etiquetas disponibles: {e.available
-                        .map((f) => f)
-                        .join(", ")}.</span
-                >
-            {:else if e.kind === "BadInitRa"}
-                <code>ra</code> inicial (<code>{hx(e.ra)}</code>) apunta dentro
-                del rango del programa [<code>{hx(e.progStart)}</code>–<code
-                    >{hx(e.progEnd - 4)}</code
-                >].<br /><br />
-                <span style="color:var(--text-dim)"
-                    >Ajusta <code>initialRegs.ra</code> a una dirección fuera del
-                    programa.</span
-                >
+            <div class="config-error-title">Error</div>
+            {#if e.message}
+                <p>{e.message}</p>
+            {/if}
+            {#if e.detail}
+                <p class="config-error-hint">{e.detail}</p>
             {/if}
         </div>
     {:else if step}
@@ -407,6 +366,9 @@
         font-weight: 600;
         font-size: 17px;
         margin-bottom: 12px;
+    }
+    .config-error-hint {
+        color: var(--text-dim);
     }
     .stack-wrapper {
         display: flex;

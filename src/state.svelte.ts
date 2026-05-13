@@ -1,5 +1,5 @@
 import type { AssemblyResult, DisplayReg, Program, Step } from "./types";
-import { ConfigError, OverlapError, ParseError, RangeError } from "./types";
+import { AppError } from "./types";
 import { assembleProgram, hx } from "./assembler";
 import { ALL_REGS, REG_META, simulate } from "./simulator";
 import { PROGRAMS } from "./programs";
@@ -47,14 +47,6 @@ export const ui = new UIState();
 // ─── SimulationState ──────────────────────────────────────────────────────
 // Owns the loaded program, assembled code, simulation steps, and navigation.
 
-export type LoadError =
-  | { kind: "ParseError"; raw: string; label: string; message?: string }
-  | { kind: "RangeError"; raw: string; label: string }
-  | { kind: "OverlapError"; codeEnd: number; stackBase: number }
-  | { kind: "ConfigError"; message: string }
-  | { kind: "BadEntryPoint"; entryPoint: string; available: string[] }
-  | { kind: "BadInitRa"; ra: number; progStart: number; progEnd: number };
-
 export class SimulationState {
   // ── Core state ──
   program = $state<Program | null>(null);
@@ -65,7 +57,7 @@ export class SimulationState {
   displayRegs = $state<DisplayReg[]>([]);
   cur = $state(0);
   asmMode = $state<"source" | "assembled">("source");
-  loadError = $state<LoadError | null>(null);
+  loadError = $state<AppError | null>(null);
 
   // ── Derived navigation ──
   currentSourcePosIdx = $derived.by(() => {
@@ -133,43 +125,16 @@ export class SimulationState {
     this.loadError = null;
 
     const assembled = assembleProgram(prog);
-
-    if (assembled instanceof ParseError) {
-      this.loadError = {
-        kind: "ParseError",
-        raw: assembled.raw,
-        label: assembled.label,
-        message: assembled.message,
-      };
-      return;
-    }
-    if (assembled instanceof RangeError) {
-      this.loadError = {
-        kind: "RangeError",
-        raw: assembled.raw,
-        label: assembled.label,
-      };
-      return;
-    }
-    if (assembled instanceof ConfigError) {
-      this.loadError = { kind: "ConfigError", message: assembled.message };
-      return;
-    }
-    if (assembled instanceof OverlapError) {
-      this.loadError = {
-        kind: "OverlapError",
-        codeEnd: assembled.codeEnd,
-        stackBase: assembled.stackBase,
-      };
+    if (assembled instanceof AppError) {
+      this.loadError = assembled;
       return;
     }
 
     if (!(prog.entryPoint in assembled.labels)) {
-      this.loadError = {
-        kind: "BadEntryPoint",
-        entryPoint: prog.entryPoint,
-        available: Object.keys(assembled.labels),
-      };
+      this.loadError = new AppError(
+        `Entry point '${prog.entryPoint}' not found`,
+        `Available labels: ${Object.keys(assembled.labels).join(", ")}`,
+      );
       return;
     }
 
@@ -179,7 +144,10 @@ export class SimulationState {
     const progEnd = lastSi.firstAddr + lastSi.concretes.length * 4;
     const initRa = prog.initialRegs.ra ?? 0;
     if (initRa >= progStart && initRa < progEnd) {
-      this.loadError = { kind: "BadInitRa", ra: initRa, progStart, progEnd };
+      this.loadError = new AppError(
+        `Initial ra (${hx(initRa)}) points inside the program range [${hx(progStart)}\u2013${hx(progEnd - 4)}]`,
+        `Set initialRegs.ra to an address outside the program`,
+      );
       return;
     }
 

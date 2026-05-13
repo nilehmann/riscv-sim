@@ -98,24 +98,11 @@ export type ParsedInstr =
       target: string;
     };
 
-export class ConfigError {
-  readonly kind = "ConfigError" as const;
-  constructor(public readonly message: string) {}
-}
-
-export class OverlapError {
-  readonly kind = "OverlapError" as const;
+export class AppError {
+  readonly kind = "AppError" as const;
   constructor(
-    public readonly codeEnd: number,
-    public readonly stackBase: number,
-  ) {}
-}
-
-export class RangeError {
-  readonly kind = "RangeError" as const;
-  constructor(
-    public readonly raw: string,
-    public readonly label: string,
+    public readonly message: string,
+    public readonly detail?: string,
   ) {}
 }
 
@@ -205,13 +192,3 @@ export interface DisplayReg {
 
 export type TokenKind = "comment" | "string" | "kw" | "fn" | "num" | "text";
 export type Token = [TokenKind, string];
-
-export class ParseError {
-  readonly kind = "ParseError" as const;
-  constructor(
-    public readonly raw: string,
-    public readonly label: string,
-    /** A human-readable description of why parsing failed, if known. */
-    public readonly message?: string,
-  ) {}
-}

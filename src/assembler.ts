@@ -6,29 +6,26 @@ import type {
   SourceInstr,
   Reg,
 } from "./types";
-import {
-  ParseError,
-  RangeError,
-  OverlapError,
-  ConfigError,
-  isReg,
-} from "./types";
+import { AppError, isReg } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 export const hx = (v: number): string =>
   "0x" + (v >>> 0).toString(16).toUpperCase().padStart(8, "0");
 
 // Normalises a register name (accepting the fp alias) and validates it.
-// Returns the canonical Reg, or ParseError if the name is not a valid register.
-function parseReg(s: string | undefined, raw: string): Reg | ParseError {
-  if (!s) return new ParseError(raw, "");
+// Returns the canonical Reg, or AppError if the name is not a valid register.
+function parseReg(s: string | undefined, raw: string): Reg | AppError {
+  if (!s) return new AppError(`Unknown instruction: '${raw}'`);
   const name = s === "fp" ? "s0" : s;
   if (isReg(name)) return name;
-  return new ParseError(raw, "", `'${s}' is not a valid register name`);
+  return new AppError(
+    `'${s}' is not a valid register name`,
+    "Valid registers: x0\u2013x31 and their aliases (zero, ra, sp, a0\u2013a7, s0\u2013s11, t0\u2013t6, gp, tp)",
+  );
 }
 
 // ─── Instruction parser ───────────────────────────────────────────────────
-export function parseInstr(raw: string): ParsedInstr | ParseError {
+export function parseInstr(raw: string): ParsedInstr | AppError {
   const s = raw.trim().replace(/\s+/g, " ");
   const sp = s.indexOf(" ");
   const op = sp === -1 ? s : s.slice(0, sp);
@@ -39,35 +36,35 @@ export function parseInstr(raw: string): ParsedInstr | ParseError {
   if (op === "nop") return { op: "nop" };
   if (op === "jalr") {
     const mem = args[1] && args[1].match(/^(-?\d+)\((\w+)\)$/);
-    if (!mem) return new ParseError(raw, "");
+    if (!mem) return new AppError(`Unknown instruction: '${raw}'`);
     const rd = parseReg(args[0], raw);
     const rs1 = parseReg(mem[2], raw);
-    if (rd instanceof ParseError) return rd;
-    if (rs1 instanceof ParseError) return rs1;
+    if (rd instanceof AppError) return rd;
+    if (rs1 instanceof AppError) return rs1;
     return { op: "jalr", rd, rs1, imm: Number(mem[1]) };
   }
   if (op === "call") return { op: "call", target: args[0]! };
   if (op === "j") return { op: "j", target: args[0]! };
   if (op === "jal") {
     const rd = parseReg(args.length > 1 ? args[0] : "ra", raw);
-    if (rd instanceof ParseError) return rd;
+    if (rd instanceof AppError) return rd;
     return { op: "jal", rd, target: args[args.length - 1]! };
   }
   if (op === "li" || op === "lui") {
     const rd = parseReg(args[0], raw);
-    if (rd instanceof ParseError) return rd;
+    if (rd instanceof AppError) return rd;
     return { op, rd, imm: Number(args[1]) };
   }
   if (op === "jr") {
     const rs = parseReg(args[0], raw);
-    if (rs instanceof ParseError) return rs;
+    if (rs instanceof AppError) return rs;
     return { op: "jr", rs };
   }
   if (op === "mv" || op === "neg") {
     const rd = parseReg(args[0], raw);
     const rs1 = parseReg(args[1], raw);
-    if (rd instanceof ParseError) return rd;
-    if (rs1 instanceof ParseError) return rs1;
+    if (rd instanceof AppError) return rd;
+    if (rs1 instanceof AppError) return rs1;
     return { op, rd, rs1 };
   }
   if (
@@ -81,8 +78,8 @@ export function parseInstr(raw: string): ParsedInstr | ParseError {
   ) {
     const rd = parseReg(args[0], raw);
     const rs1 = parseReg(args[1], raw);
-    if (rd instanceof ParseError) return rd;
-    if (rs1 instanceof ParseError) return rs1;
+    if (rd instanceof AppError) return rd;
+    if (rs1 instanceof AppError) return rs1;
     return { op, rd, rs1, imm: Number(args[2]) };
   }
   if (
@@ -105,9 +102,9 @@ export function parseInstr(raw: string): ParsedInstr | ParseError {
     const rd = parseReg(args[0], raw);
     const rs1 = parseReg(args[1], raw);
     const rs2 = parseReg(args[2], raw);
-    if (rd instanceof ParseError) return rd;
-    if (rs1 instanceof ParseError) return rs1;
-    if (rs2 instanceof ParseError) return rs2;
+    if (rd instanceof AppError) return rd;
+    if (rs1 instanceof AppError) return rs1;
+    if (rs2 instanceof AppError) return rs2;
     return {
       op: op as
         | "add"
@@ -135,10 +132,10 @@ export function parseInstr(raw: string): ParsedInstr | ParseError {
     const mem = args[1] && args[1].match(/^(-?\d+)\((\w+)\)$/);
     if (mem) {
       const rs1 = parseReg(mem[2], raw);
-      if (rs1 instanceof ParseError) return rs1;
+      if (rs1 instanceof AppError) return rs1;
       if (op === "sw" || op === "sb" || op === "sh") {
         const rs2 = parseReg(args[0], raw);
-        if (rs2 instanceof ParseError) return rs2;
+        if (rs2 instanceof AppError) return rs2;
         return {
           op: op as "sw" | "sh" | "sb",
           rs2,
@@ -147,7 +144,7 @@ export function parseInstr(raw: string): ParsedInstr | ParseError {
         };
       }
       const rd = parseReg(args[0], raw);
-      if (rd instanceof ParseError) return rd;
+      if (rd instanceof AppError) return rd;
       return {
         op: op as "lw" | "lh" | "lb" | "lhu" | "lbu",
         rd,
@@ -160,8 +157,8 @@ export function parseInstr(raw: string): ParsedInstr | ParseError {
   if ((["beq", "bne", "blt", "bge", "bltu", "bgeu"] as string[]).includes(op)) {
     const rs1 = parseReg(args[0], raw);
     const rs2 = parseReg(args[1], raw);
-    if (rs1 instanceof ParseError) return rs1;
-    if (rs2 instanceof ParseError) return rs2;
+    if (rs1 instanceof AppError) return rs1;
+    if (rs2 instanceof AppError) return rs2;
     return {
       op: op as "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu",
       rs1,
@@ -170,7 +167,7 @@ export function parseInstr(raw: string): ParsedInstr | ParseError {
     };
   }
 
-  return new ParseError(s, "");
+  return new AppError(`Unknown instruction: '${s}'`);
 }
 
 // ─── Pseudo-instruction expander ─────────────────────────────────────────
@@ -180,7 +177,7 @@ function assembleInstr(
   labels: Record<string, number>,
   raw: string,
   label: string,
-): ConcreteSpec[] | RangeError {
+): ConcreteSpec[] | AppError {
   const p = parsed;
   // JAL range: signed 21-bit offset, must be multiple of 2 → ±1 MiB
   const JAL_MAX = (1 << 20) - 1;
@@ -189,17 +186,25 @@ function assembleInstr(
   const BR_MAX = (1 << 12) - 1;
   const BR_MIN = -(1 << 12);
 
-  function resolveJalOffset(target: string): number | RangeError {
+  function resolveJalOffset(target: string): number | AppError {
     const labelAddr = labels[target];
     const offset = labelAddr - addr;
-    if (offset < JAL_MIN || offset > JAL_MAX) return new RangeError(raw, label);
+    if (offset < JAL_MIN || offset > JAL_MAX)
+      return new AppError(
+        `Jump to '${target}' is out of JAL range (\u00b11 MiB)`,
+        `Instruction: ${raw}` + (label ? `, label: ${label}` : ""),
+      );
     return offset;
   }
 
-  function resolveBranchOffset(target: string): number | RangeError {
+  function resolveBranchOffset(target: string): number | AppError {
     const labelAddr = labels[target];
     const offset = labelAddr - addr;
-    if (offset < BR_MIN || offset > BR_MAX) return new RangeError(raw, label);
+    if (offset < BR_MIN || offset > BR_MAX)
+      return new AppError(
+        `Branch to '${target}' is out of range (\u00b14 KiB)`,
+        `Instruction: ${raw}` + (label ? `, label: ${label}` : ""),
+      );
     return offset;
   }
 
@@ -212,7 +217,7 @@ function assembleInstr(
       return [{ op: "jalr", rd: p.rd, rs1: p.rs1, imm: p.imm }];
     case "call": {
       const offset = resolveJalOffset(p.target);
-      if (offset instanceof RangeError) {
+      if (offset instanceof AppError) {
         // Offset too large for JAL: emit auipc + jalr
         const labelAddr = labels[p.target];
         const off = labelAddr - addr;
@@ -227,12 +232,12 @@ function assembleInstr(
     }
     case "j": {
       const offset = resolveJalOffset(p.target);
-      if (offset instanceof RangeError) return offset;
+      if (offset instanceof AppError) return offset;
       return [{ op: "jal", rd: "zero", target: offset }];
     }
     case "jal": {
       const offset = resolveJalOffset(p.target);
-      if (offset instanceof RangeError) return offset;
+      if (offset instanceof AppError) return offset;
       return [{ op: "jal", rd: p.rd, target: offset }];
     }
     case "jr": {
@@ -291,7 +296,7 @@ function assembleInstr(
     case "bltu":
     case "bgeu": {
       const offset = resolveBranchOffset(p.target);
-      if (offset instanceof RangeError) return offset;
+      if (offset instanceof AppError) return offset;
       return [{ op: p.op, rs1: p.rs1, rs2: p.rs2, target: offset }];
     }
     default:
@@ -316,7 +321,7 @@ function worstCaseSize(parsed: ParsedInstr): number {
 
 type ParsedLine = { label: string; raw: string; parsed: ParsedInstr };
 
-function parseProgram(prog: Program): ParsedLine[] | ParseError {
+function parseProgram(prog: Program): ParsedLine[] | AppError {
   const parsedLines: ParsedLine[] = [];
   let currentLabel = "";
   for (const rawLine of prog.assembly.split("\n")) {
@@ -327,37 +332,34 @@ function parseProgram(prog: Program): ParsedLine[] | ParseError {
       continue;
     }
     const parsed = parseInstr(line);
-    if (parsed instanceof ParseError)
-      return new ParseError(parsed.raw, currentLabel, parsed.message);
+    if (parsed instanceof AppError) return parsed;
     parsedLines.push({ label: currentLabel, raw: line, parsed });
   }
   return parsedLines;
 }
 
-export function assembleProgram(
-  prog: Program,
-): AssemblyResult | ParseError | RangeError | OverlapError | ConfigError {
+export function assembleProgram(prog: Program): AssemblyResult | AppError {
   // ── Range validation: all numeric config values must fit in 32 bits ───────
   const u32 = (v: number) => v >>> 0 === v;
   if (!u32(prog.baseAddress))
-    return new ConfigError(
-      `baseAddress ${hx(prog.baseAddress)} no cabe en 32 bits.`,
+    return new AppError(
+      `baseAddress ${hx(prog.baseAddress)} does not fit in 32 bits`,
     );
   if (prog.stackBase != null && !u32(prog.stackBase))
-    return new ConfigError(
-      `stackBase ${hx(prog.stackBase)} no cabe en 32 bits.`,
+    return new AppError(
+      `stackBase ${hx(prog.stackBase!)} does not fit in 32 bits`,
     );
   for (const [reg, val] of Object.entries(prog.initialRegs)) {
     if (!u32(val))
-      return new ConfigError(
-        `Registro inicial ${reg} = 0x${val.toString(16).toUpperCase()} no cabe en 32 bits.`,
+      return new AppError(
+        `Initial register ${reg} = 0x${val.toString(16).toUpperCase()} does not fit in 32 bits`,
       );
   }
 
   // ── Pass 1: parse all instructions and assign label addresses ──────────
   // Use worst-case sizes so label addresses are upper bounds.
   const parsedLines = parseProgram(prog);
-  if (parsedLines instanceof ParseError) return parsedLines;
+  if (parsedLines instanceof AppError) return parsedLines;
 
   // Pass 1: section-relative addresses from 0 (baseAddress not involved).
   const labels: Record<string, number> = {};
@@ -378,7 +380,7 @@ export function assembleProgram(
 
   for (const { label, raw, parsed } of parsedLines) {
     const assembled = assembleInstr(parsed, addr, labels, raw, label);
-    if (assembled instanceof RangeError) return assembled;
+    if (assembled instanceof AppError) return assembled;
     const firstAddr = addr;
     const concretes: ConcreteSpec[] = [];
     for (const spec of assembled) {
@@ -392,14 +394,18 @@ export function assembleProgram(
   // Overlap check: code section must not reach into the stack region.
   const stackBase = prog.stackBase ?? 0xc0000000;
   const codeEnd = prog.baseAddress + addr;
-  if (codeEnd > stackBase) return new OverlapError(codeEnd, stackBase);
+  if (codeEnd > stackBase)
+    return new AppError(
+      `Code section ends at ${hx(codeEnd)}, overlapping stack base ${hx(stackBase)}`,
+      "Reduce baseAddress or increase stackBase",
+    );
 
   // sp consistency check: initial sp must be ≤ stackBase, otherwise [sp, stackBase) is empty.
   if (prog.osMode !== false) {
     const initSp = prog.initialRegs.sp ?? 0;
     if (initSp > stackBase)
-      return new ConfigError(
-        `sp inicial (${hx(initSp)}) es mayor que stackBase (${hx(stackBase)}). El rango de stack válido [sp, stackBase) estaría vacío.`,
+      return new AppError(
+        `Initial sp (${hx(initSp)}) is greater than stackBase (${hx(stackBase)}); the valid stack range [sp, stackBase) would be empty`,
       );
   }
 
