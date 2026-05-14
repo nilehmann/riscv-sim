@@ -96,10 +96,6 @@ export class Machine {
     if (isReg(r)) this.regs[r] = value;
   }
 
-  writeMem(addr: number, value: number): void {
-    this.mem.set(addr, value);
-  }
-
   writeMemSized(addr: number, value: number, bytes: 1 | 2 | 4): void {
     const mask = bytes === 1 ? 0xff : bytes === 2 ? 0xffff : 0xffffffff;
     this.mem.set(addr, value & mask);
@@ -141,33 +137,15 @@ export function simulate(
   const stackBase = prog.stackBase ?? 0xc0000000;
   const osMode = prog.osMode !== false;
   const machine = new Machine(prog.initialRegs, stackBase, osMode);
-  const slotLabels = new Map<number, string>(); // addr → saved register name
 
   let pc = labels[prog.entryPoint];
-
-  // callStack tracks inferred call frames for the stack visualization.
-  // entrySpBefore: sp when this function was entered.
-  // allocatedSize: bytes claimed by the prologue so far.
-  const callStack = [
-    {
-      label: prog.entryPoint,
-      entrySpBefore: machine.regs.sp,
-      allocatedSize: 0,
-    },
-  ];
 
   const steps: Step[] = [];
   const sourceToConcrete: number[] = [];
 
   function snap() {
     const { regs, mem } = machine.snapshot();
-    return {
-      regs,
-      mem,
-      slotLabels: new Map(slotLabels),
-      callStack: callStack.map((f) => ({ ...f })),
-      pc,
-    };
+    return { regs, mem };
   }
 
   function makeStep(
@@ -177,6 +155,7 @@ export function simulate(
     instrAddr: number | null,
     nextAddr: number | null,
     fault?: { type: "segfault"; addr: number },
+    store?: { addr: number; reg: string },
   ): Step {
     return {
       aHl: instrAddr != null ? [instrAddr] : [],
@@ -185,18 +164,14 @@ export function simulate(
       hiReg: hiReg || [],
       mem: s.mem,
       hiSlots: hiSlots || [],
-      slotLabels: s.slotLabels,
-      callStack: s.callStack,
+      store,
       fault,
     };
   }
 
   function segfault(faultAddr: number, instrAddr: number): void {
     steps.push(
-      makeStep(snap(), [], [], instrAddr, null, {
-        type: "segfault",
-        addr: faultAddr,
-      }),
+      makeStep(snap(), [], [], instrAddr, null, { type: "segfault", addr: faultAddr }),
     );
   }
 
@@ -258,17 +233,6 @@ export function simulate(
           machine.writeReg(ci.rd, val);
           pc += 4;
           hiReg.push(ci.rd);
-          if (ci.rd === "sp") {
-            let top = null;
-            for (let i = callStack.length - 1; i >= 0; i--) {
-              if (callStack[i].label === si.label) {
-                top = callStack[i];
-                break;
-              }
-            }
-            if (!top) top = callStack[callStack.length - 1];
-            top.allocatedSize = top.entrySpBefore - val;
-          }
           break;
         }
 
@@ -287,17 +251,6 @@ export function simulate(
           machine.writeReg(ci.rd, val);
           pc += 4;
           hiReg.push(ci.rd);
-          if (ci.rd === "sp") {
-            let top = null;
-            for (let i = callStack.length - 1; i >= 0; i--) {
-              if (callStack[i].label === si.label) {
-                top = callStack[i];
-                break;
-              }
-            }
-            if (!top) top = callStack[callStack.length - 1];
-            top.allocatedSize = top.entrySpBefore - val;
-          }
           break;
         }
 
@@ -318,26 +271,12 @@ export function simulate(
         case "jal": {
           machine.writeReg(ci.rd, ciAddr + 4);
           if (ci.rd !== "zero") hiReg.push(ci.rd);
-          if (si.parsed.op === "call") {
-            callStack.push({
-              label: (si.parsed as any).target,
-              entrySpBefore: machine.regs.sp,
-              allocatedSize: 0,
-            });
-          }
           pc = ciAddr + ci.target;
           break;
         }
 
         case "jalr": {
           const jumpTarget = (machine.regs[ci.rs1] + ci.imm) & ~1;
-          if (si.parsed.op === "call") {
-            callStack.push({
-              label: (si.parsed as any).target,
-              entrySpBefore: machine.regs.sp,
-              allocatedSize: 0,
-            });
-          }
           machine.writeReg(ci.rd, ciAddr + 4);
           if (ci.rd !== "zero") hiReg.push(ci.rd);
           pc = jumpTarget;
@@ -359,10 +298,10 @@ export function simulate(
             storeBytes as 1 | 2 | 4,
           );
           const storeDisplayAddr = storeBytes < 4 ? addr & ~3 : addr;
-          slotLabels.set(storeDisplayAddr, ci.rs2);
           pc += 4;
           hiSlots.push(storeDisplayAddr);
-          break;
+          steps.push(makeStep(snap(), hiReg, hiSlots, ciAddr, pc, undefined, { addr: storeDisplayAddr, reg: ci.rs2 }));
+          continue;
         }
 
         case "lw":

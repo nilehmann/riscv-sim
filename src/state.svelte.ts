@@ -1,7 +1,8 @@
-import type { AssemblyResult, DisplayReg, Program, Step } from "./types";
+import type { AssemblyResult, DisplayReg, FrameInfo, Program, Step } from "./types";
 import { AppError } from "./types";
 import { assembleProgram, hx } from "./assembler";
 import { ALL_REGS, REG_META, simulate } from "./simulator";
+import { inferDisplayState } from "./inferDisplay";
 import { PROGRAMS } from "./programs";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -55,6 +56,8 @@ export class SimulationState {
   /** Concrete step index of the last concrete instr for source[i]. sourcePositions[0]=0, then sourceToConcrete values. */
   sourcePositions = $state<number[]>([]);
   displayRegs = $state<DisplayReg[]>([]);
+  callFramesByStep = $state<FrameInfo[][]>([]);
+  slotLabelsByStep = $state<Map<number, string>[]>([]);
   cur = $state(0);
   asmMode = $state<"source" | "assembled">("source");
   loadError = $state<AppError | null>(null);
@@ -84,6 +87,8 @@ export class SimulationState {
   );
 
   currentStep = $derived(this.steps[this.cur] ?? null);
+  currentCallFrames = $derived(this.callFramesByStep[this.cur] ?? []);
+  currentSlotLabels = $derived(this.slotLabelsByStep[this.cur] ?? new Map<number, string>());
 
   // ── Actions ──
 
@@ -152,10 +157,13 @@ export class SimulationState {
     }
 
     const { steps, sourceToConcrete } = simulate(prog, assembled);
+    const { callFramesByStep, slotLabelsByStep } = inferDisplayState(steps, assembled, prog);
 
     this.program = prog;
     this.assembled = assembled;
     this.steps = steps;
+    this.callFramesByStep = callFramesByStep;
+    this.slotLabelsByStep = slotLabelsByStep;
     this.sourcePositions = [0, ...sourceToConcrete];
     this.displayRegs = computeDisplayRegs(prog, assembled);
     this.cur = 0;

@@ -20,13 +20,13 @@
     const currentSp = $derived(step?.regs?.sp ?? 0);
 
     const callerBase = $derived(
-        step?.callStack && step.callStack.length > 0
-            ? step.callStack[0]!.entrySpBefore
+        sim.currentCallFrames.length > 0
+            ? sim.currentCallFrames[0]!.entrySpBefore
             : currentSp + 16,
     );
 
     const activeFrames = $derived(
-        (step?.callStack ?? []).filter((f) => currentSp < f.entrySpBefore),
+        sim.currentCallFrames.filter((f) => currentSp < f.entrySpBefore),
     );
 
     const hiS = $derived(new Set(step?.hiSlots ?? []));
@@ -277,7 +277,7 @@
                         data-label={frame.label}
                     >
                         {#each frameSlots as addr}
-                            {@const label = step?.slotLabels?.get(addr)}
+                            {@const label = sim.currentSlotLabels.get(addr)}
                             {@const slotVal = getSlotVal(addr)}
                             {@const tooltip = getSlotTooltip(addr)}
                             {@const isHi = hiS.has(addr)}

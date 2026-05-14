@@ -174,8 +174,7 @@ export interface Step {
   hiReg: string[];
   mem: Map<number, number>;
   hiSlots: number[];
-  slotLabels: Map<number, string>;
-  callStack: FrameInfo[];
+  store?: { addr: number; reg: string };
   fault?: { type: "segfault"; addr: number };
 }
 
