@@ -1,6 +1,7 @@
 <script lang="ts">
     import { sim, ui, fmtRegVal } from "./state.svelte";
     import { hx } from "./assembler";
+    import HexValue from "./HexValue.svelte";
 
     const hiR = $derived(new Set(sim.currentStep?.hiReg ?? []));
     const nextAddr = $derived(sim.currentStep?.nextAddr ?? null);
@@ -40,12 +41,7 @@
                         <span class="reg-name">{r.name}</span>
                     {/if}
                     {#if val !== null}
-                        <span
-                            class="reg-val"
-                            data-tooltip="sin signo: {val >>>
-                                0}\ncon signo: {val | 0}"
-                            >{fmtRegVal(r.key, val)}</span
-                        >
+                        <HexValue value={val} />
                     {:else}
                         <span class="reg-val">{fmtRegVal(r.key, null)}</span>
                     {/if}

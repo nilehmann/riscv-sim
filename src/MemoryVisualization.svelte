@@ -2,6 +2,7 @@
   import type { MemoryRegion } from "./types";
   import { sim } from "./state.svelte";
   import { hx } from "./assembler";
+  import HexValue from "./HexValue.svelte";
 
   function isHighlighted(elemAddr: number): boolean {
     const wordAddr = elemAddr & ~3;
@@ -29,7 +30,7 @@
             {@const elemAddr = region.addr + i * region.elementSize}
             <div class="region-slot" class:hi={isHighlighted(elemAddr)}>
               <span class="slot-idx">[{i}]</span>
-              <span class="slot-val">{hx(readElement(region, i))}</span>
+              <HexValue value={readElement(region, i)} elementSize={region.elementSize} />
             </div>
           {/each}
         </div>
@@ -97,11 +98,5 @@
     font-size: 13px;
     color: var(--text-faint);
     margin-bottom: 2px;
-  }
-  .slot-val {
-    font-family: var(--mono);
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text);
   }
 </style>

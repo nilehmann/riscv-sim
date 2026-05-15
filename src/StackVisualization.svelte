@@ -2,6 +2,7 @@
     import type { FrameInfo, Step } from "./types";
     import { sim, ui } from "./state.svelte";
     import { hx } from "./assembler";
+    import HexValue from "./HexValue.svelte";
 
     // ─── Constants ────────────────────────────────────────────────────────
     const FRAME_COLORS = [
@@ -169,8 +170,7 @@
         offsetsEl.innerHTML = html;
     }
 
-    // ─── Load error rendering ─────────────────────────────────────────────
-    function getSlotVal(addr: number): string | undefined {
+    function getSlotMemVal(addr: number): number | undefined {
         if (!step?.mem) return undefined;
         let val = step.mem.get(addr);
         if (val === undefined) {
@@ -182,15 +182,9 @@
                 }
             }
         }
-        return val !== undefined ? hx(val) : undefined;
+        return val;
     }
 
-    function getSlotTooltip(addr: number): string | undefined {
-        if (!step?.mem) return undefined;
-        const val = step.mem.get(addr);
-        if (val === undefined) return undefined;
-        return `sin signo: ${val >>> 0}\ncon signo: ${val | 0}`;
-    }
 </script>
 
 <div class="stack-area scrollable">
@@ -245,7 +239,7 @@
                             use:registerSlotAction={row.addr}
                         >
                             <span class="slot-name">{hx(row.addr)}</span>
-                            <span class="slot-val">—</span>
+                            <span class="slot-uninit">—</span>
                         </div>
                     {/each}
                     <!-- Boundary slot at callerBase -->
@@ -255,7 +249,7 @@
                         use:registerSlotAction={callerBase}
                     >
                         <span class="slot-name">{hx(callerBase)}</span>
-                        <span class="slot-val" style="color:var(--text-faint)"
+                        <span class="slot-uninit" style="color:var(--text-faint)"
                             >—</span
                         >
                     </div>
@@ -278,8 +272,7 @@
                     >
                         {#each frameSlots as addr}
                             {@const label = sim.currentSlotLabels.get(addr)}
-                            {@const slotVal = getSlotVal(addr)}
-                            {@const tooltip = getSlotTooltip(addr)}
+                            {@const memVal = getSlotMemVal(addr)}
                             {@const isHi = hiS.has(addr)}
                             <div
                                 class="frame-slot"
@@ -295,17 +288,10 @@
                                         ? `${hx(addr)}  ${label}`
                                         : hx(addr)}</span
                                 >
-                                {#if tooltip}
-                                    <span
-                                        class="slot-val"
-                                        data-tooltip={tooltip}
-                                    >
-                                        {slotVal ?? "—"}
-                                    </span>
+                                {#if memVal !== undefined}
+                                    <HexValue value={memVal} />
                                 {:else}
-                                    <span class="slot-val"
-                                        >{slotVal ?? "—"}</span
-                                    >
+                                    <span class="slot-uninit">—</span>
                                 {/if}
                             </div>
                         {/each}
@@ -326,7 +312,7 @@
                                 >{hx(row.addr)}</span
                             >
                             <span
-                                class="slot-val"
+                                class="slot-uninit"
                                 style="color:var(--text-faint)">—</span
                             >
                         </div>
@@ -537,15 +523,17 @@
         border-top-style: dashed;
     }
     .frame.free .slot-name,
-    .frame.free .slot-val {
+    .frame.free .slot-uninit {
         color: var(--text-faint);
     }
     .slot-name {
         color: var(--text-dim);
     }
-    .slot-val {
+    .slot-uninit {
         color: var(--text);
         font-weight: 600;
+        font-family: var(--mono);
+        font-size: 16px;
     }
     .scrollable::-webkit-scrollbar {
         width: 4px;
