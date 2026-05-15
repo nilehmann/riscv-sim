@@ -76,12 +76,14 @@
                   <span class="slot-addr">{hx(elemAddr)}</span>
                   <span class="slot-idx">[{i}]</span>
                 </div>
-                <HexValue value={readElement(region, i)} elementSize={nativeSize} />
+                <div class="word-val">
+                  <HexValue value={readElement(region, i)} elementSize={nativeSize} />
+                </div>
               {:else}
-                <div class="expanded-grid">
+                <div class="slot-expanded">
                   {#if nativeSize > 1}
                     <select
-                      class="slot-select expanded-select"
+                      class="slot-select"
                       value={mode}
                       onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
                     >
@@ -90,13 +92,17 @@
                       <option value="byte">b</option>
                     </select>
                   {/if}
-                  {#each subSlots(elemAddr, nativeSize, mode) as sub}
-                    <span class="sub-grid-addr">{hx(sub.addr)}</span>
-                    <HexValue
-                      value={readBytes(sim.currentStep?.mem ?? new Map(), sub.addr, sub.size)}
-                      elementSize={sub.size}
-                    />
-                  {/each}
+                  <div class="pairs-grid">
+                    {#each subSlots(elemAddr, nativeSize, mode) as sub}
+                      <span class="sub-grid-addr">{hx(sub.addr)}</span>
+                      <div class="val-cell">
+                        <HexValue
+                          value={readBytes(sim.currentStep?.mem ?? new Map(), sub.addr, sub.size)}
+                          elementSize={sub.size}
+                        />
+                      </div>
+                    {/each}
+                  </div>
                 </div>
               {/if}
             </div>
@@ -183,17 +189,24 @@
     color: var(--text-faint);
     cursor: pointer;
   }
-  .expanded-grid {
+  .word-val {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .slot-expanded {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+  }
+  .pairs-grid {
     display: grid;
     grid-auto-flow: column;
     grid-template-rows: auto auto;
     column-gap: 8px;
     row-gap: 4px;
-    align-items: start;
-  }
-  .expanded-select {
-    grid-row: 1 / span 2;
-    align-self: center;
   }
   .sub-grid-addr {
     font-family: var(--mono);
@@ -201,5 +214,9 @@
     color: var(--text-faint);
     border-bottom: 1px solid var(--border);
     padding-bottom: 4px;
+  }
+  .val-cell {
+    display: flex;
+    justify-content: flex-end;
   }
 </style>
