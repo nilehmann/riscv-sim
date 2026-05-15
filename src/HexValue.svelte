@@ -39,7 +39,7 @@
   onmouseenter={enter}
   onmousemove={move}
   onmouseleave={leave}
->{hx(value)}</span>
+>{hx(value, elementSize)}</span>
 
 {#if show}
   <div

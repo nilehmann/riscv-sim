@@ -9,8 +9,8 @@ import type {
 import { AppError, isReg } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
-export const hx = (v: number): string =>
-  "0x" + (v >>> 0).toString(16).toUpperCase().padStart(8, "0");
+export const hx = (v: number, bytes: 1 | 2 | 4 = 4): string =>
+  "0x" + (v >>> 0).toString(16).toUpperCase().padStart(bytes * 2, "0");
 
 // Normalises a register name (accepting the fp alias) and validates it.
 // Returns the canonical Reg, or AppError if the name is not a valid register.
