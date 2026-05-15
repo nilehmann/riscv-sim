@@ -84,6 +84,7 @@
         const _callerBase = callerBase;
         const _activeFrames = activeFrames;
         const _showFp = ui.showFp;
+        const _slotViewMode = ui.slotViewMode;
         const _slots = slotEls; // reactive map
 
         if (!wrapperEl || !_step) return;
@@ -96,17 +97,24 @@
         });
     });
 
+    function resolveSlotTarget(addr: number): Element | null {
+        const el = slotEls.get(addr);
+        if (!el) return null;
+        const key = `stack-${addr.toString(16)}`;
+        const mode = ui.slotViewMode.get(key) ?? 'word';
+        if (mode !== 'word') {
+            return el.querySelector('.sub-slot') ?? el;
+        }
+        return el;
+    }
+
     function positionArrow(
         arrow: HTMLElement | null,
-        targetAddr: number,
-        fallbackAddr: number,
+        target: Element | null,
         firstRenderFlag: boolean,
         setFirstRenderDone: () => void,
     ) {
-        if (!arrow || !wrapperEl) return;
-        let target =
-            slotEls.get(targetAddr) ?? slotEls.get(fallbackAddr) ?? null;
-        if (!target) return;
+        if (!arrow || !wrapperEl || !target) return;
         const wRect = wrapperEl.getBoundingClientRect();
         const tRect = target.getBoundingClientRect();
         const top = tRect.top - wRect.top + tRect.height / 2;
@@ -122,16 +130,16 @@
     }
 
     function positionSpArrow(_step: Step, _sp: number, _callerBase: number) {
-        let firstRender = ui.firstArrowRender;
-        positionArrow(spArrowEl, _sp, _callerBase, firstRender, () => {
+        const target = resolveSlotTarget(_sp) ?? resolveSlotTarget(_callerBase);
+        positionArrow(spArrowEl, target, ui.firstArrowRender, () => {
             ui.firstArrowRender = false;
         });
     }
 
     function positionFpArrow(_step: Step, _callerBase: number) {
         const fpAddr = _step.regs?.s0 ?? 0;
-        let firstRender = ui.firstFpArrowRender;
-        positionArrow(fpArrowEl, fpAddr, _callerBase, firstRender, () => {
+        const target = resolveSlotTarget(fpAddr) ?? resolveSlotTarget(_callerBase);
+        positionArrow(fpArrowEl, target, ui.firstFpArrowRender, () => {
             ui.firstFpArrowRender = false;
         });
     }
@@ -158,14 +166,31 @@
         const wTop = wrapperEl.getBoundingClientRect().top;
         let html = "";
         for (const [addr, el] of slotEls) {
-            const offset = addr - _sp;
-            if (offset === 0) continue;
-            if (Math.abs(offset) > OFFSET_MAX) continue;
-            const sign = offset > 0 ? "+" : "";
             const opacity = parseFloat(el.style.opacity || "1");
-            const rect = el.getBoundingClientRect();
-            const top = rect.top - wTop + rect.height / 2;
-            html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">sp${sign}${offset}</div>`;
+            const key = `stack-${addr.toString(16)}`;
+            const mode = ui.slotViewMode.get(key) ?? 'word';
+
+            if (mode !== 'word') {
+                const subSize = mode === 'byte' ? 1 : 2;
+                const subSlotDivs = el.querySelectorAll('.sub-slot');
+                subSlotDivs.forEach((subEl, si) => {
+                    const subAddr = addr + si * subSize;
+                    const offset = subAddr - _sp;
+                    if (offset === 0 || Math.abs(offset) > OFFSET_MAX) return;
+                    const sign = offset > 0 ? "+" : "";
+                    const rect = subEl.getBoundingClientRect();
+                    const top = rect.top - wTop + rect.height / 2;
+                    html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">sp${sign}${offset}</div>`;
+                });
+            } else {
+                const offset = addr - _sp;
+                if (offset === 0) continue;
+                if (Math.abs(offset) > OFFSET_MAX) continue;
+                const sign = offset > 0 ? "+" : "";
+                const rect = el.getBoundingClientRect();
+                const top = rect.top - wTop + rect.height / 2;
+                html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">sp${sign}${offset}</div>`;
+            }
         }
         offsetsEl.innerHTML = html;
     }
