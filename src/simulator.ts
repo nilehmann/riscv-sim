@@ -97,15 +97,16 @@ export class Machine {
   }
 
   writeMemSized(addr: number, value: number, bytes: 1 | 2 | 4): void {
-    const mask = bytes === 1 ? 0xff : bytes === 2 ? 0xffff : 0xffffffff;
-    this.mem.set(addr, value & mask);
+    for (let i = 0; i < bytes; i++) {
+      this.mem.set(addr + i, (value >>> (i * 8)) & 0xff);
+    }
   }
 
   readMem(addr: number): number {
     if (this.mem.has(addr)) return this.mem.get(addr)!;
     if (this.osMode) {
       // Uninitialized stack slot: materialize garbage deterministically.
-      const v = garbageValue(addr);
+      const v = garbageValue(addr) & 0xff;
       this.mem.set(addr, v);
       return v;
     }
@@ -113,11 +114,11 @@ export class Machine {
   }
 
   readMemSized(addr: number, bytes: 1 | 2 | 4, signed: boolean): number {
-    const raw = this.readMem(addr);
-    if (bytes === 4) return raw;
-    const mask = bytes === 1 ? 0xff : 0xffff;
-    const val = raw & mask;
-    if (!signed) return val;
+    let val = 0;
+    for (let i = 0; i < bytes; i++) {
+      val |= (this.readMem(addr + i) & 0xff) << (i * 8);
+    }
+    if (!signed || bytes === 4) return val;
     const shift = (4 - bytes) * 8;
     return (val << shift) >> shift;
   }

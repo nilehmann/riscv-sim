@@ -172,17 +172,18 @@
 
     function getSlotMemVal(addr: number): number | undefined {
         if (!step?.mem) return undefined;
-        let val = step.mem.get(addr);
-        if (val === undefined) {
-            for (let b = 1; b < 4; b++) {
-                const bVal = step.mem.get(addr + b);
-                if (bVal !== undefined) {
-                    val = bVal;
-                    break;
-                }
-            }
-        }
-        return val;
+        const b0 = step.mem.get(addr);
+        const b1 = step.mem.get(addr + 1);
+        const b2 = step.mem.get(addr + 2);
+        const b3 = step.mem.get(addr + 3);
+        if (b0 === undefined && b1 === undefined && b2 === undefined && b3 === undefined)
+            return undefined;
+        return (
+            ((b0 ?? 0) & 0xff) |
+            (((b1 ?? 0) & 0xff) << 8) |
+            (((b2 ?? 0) & 0xff) << 16) |
+            (((b3 ?? 0) & 0xff) << 24)
+        );
     }
 
 </script>

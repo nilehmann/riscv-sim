@@ -11,12 +11,15 @@
 
   function readElement(region: MemoryRegion, i: number): number {
     const addr = region.addr + i * region.elementSize;
-    const raw = sim.currentStep?.mem.get(addr) ?? 0;
+    let val = 0;
+    for (let b = 0; b < region.elementSize; b++) {
+      val |= ((sim.currentStep?.mem.get(addr + b) ?? 0) & 0xff) << (b * 8);
+    }
     const mask =
       region.elementSize === 1 ? 0xff
       : region.elementSize === 2 ? 0xffff
       : 0xffffffff;
-    return raw & mask;
+    return val & mask;
   }
 </script>
 
