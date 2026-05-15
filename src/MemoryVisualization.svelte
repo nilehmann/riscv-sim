@@ -24,12 +24,14 @@
   <div class="memory-panel">
     {#each sim.program.memoryRegions as region}
       <div class="region-card">
-        <div class="region-header">{hx(region.addr)}</div>
         <div class="region-slots">
           {#each region.elements as _, i}
             {@const elemAddr = region.addr + i * region.elementSize}
             <div class="region-slot" class:hi={isHighlighted(elemAddr)}>
-              <span class="slot-idx">[{i}]</span>
+              <div class="slot-meta">
+                <span class="slot-addr">{hx(elemAddr)}</span>
+                <span class="slot-idx">[{i}]</span>
+              </div>
               <HexValue value={readElement(region, i)} elementSize={region.elementSize} />
             </div>
           {/each}
@@ -53,27 +55,19 @@
     flex-direction: column;
     border: 1px solid var(--border);
   }
-  .region-header {
-    font-family: var(--mono);
-    font-size: 13px;
-    color: var(--text-faint);
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  .region-slots {
+.region-slots {
     display: flex;
     flex-direction: row;
   }
   .region-slot {
     display: flex;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     padding: 6px 10px;
     border-right: 1px solid var(--border);
     background: var(--surface);
     position: relative;
-    min-width: 80px;
+    min-width: 140px;
   }
   .region-slot:last-child {
     border-right: none;
@@ -93,10 +87,24 @@
   .region-slot.hi::after {
     animation: slot-flash 0.8s ease-out forwards;
   }
+  .slot-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 4px;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+  }
+  .slot-addr {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-faint);
+  }
   .slot-idx {
     font-family: var(--mono);
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-faint);
-    margin-bottom: 2px;
   }
 </style>

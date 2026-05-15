@@ -63,7 +63,6 @@
     font-family: var(--mono);
     font-size: 16px;
     color: var(--text);
-    font-weight: 600;
     cursor: default;
     text-decoration: underline dotted currentColor;
     text-underline-offset: 2px;
