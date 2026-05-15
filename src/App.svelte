@@ -1,6 +1,7 @@
 <script lang="ts">
     import CodePanel from "./CodePanel.svelte";
     import StackVisualization from "./StackVisualization.svelte";
+    import MemoryVisualization from "./MemoryVisualization.svelte";
     import RegisterPanel from "./RegisterPanel.svelte";
     import Controls from "./Controls.svelte";
 
@@ -79,6 +80,7 @@
 <div class="main">
     <CodePanel />
     <div class="center-panel">
+        <MemoryVisualization />
         <StackVisualization />
     </div>
     <RegisterPanel />

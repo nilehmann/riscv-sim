@@ -39,6 +39,12 @@ export function isReg(s: string): s is Reg {
   return (ALL_REGS as readonly string[]).includes(s);
 }
 
+export interface MemoryRegion {
+  addr: number;
+  elementSize: 1 | 2 | 4;
+  elements: number[];
+}
+
 export interface Program {
   name: string;
   cCode?: string;
@@ -50,6 +56,7 @@ export interface Program {
   /** When true, memory accesses outside [sp, stackBase) segfault. Default: true */
   osMode?: boolean;
   assembly: string;
+  memoryRegions?: MemoryRegion[];
 }
 
 export type ParsedInstr =

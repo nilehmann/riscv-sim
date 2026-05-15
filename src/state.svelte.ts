@@ -156,6 +156,54 @@ export class SimulationState {
       return;
     }
 
+    const stackBase = prog.stackBase ?? 0xc0000000;
+    const stackTop = prog.initialRegs.sp ?? stackBase;
+    const regions = prog.memoryRegions ?? [];
+
+    function overlaps(aS: number, aE: number, bS: number, bE: number) {
+      return aS < bE && bS < aE;
+    }
+
+    for (let ri = 0; ri < regions.length; ri++) {
+      const r = regions[ri]!;
+      const rEnd = r.addr + r.elements.length * r.elementSize;
+
+      const maxUnsigned = r.elementSize === 4 ? 0xffffffff : (1 << (r.elementSize * 8)) - 1;
+      for (let i = 0; i < r.elements.length; i++) {
+        const v = r.elements[i]!;
+        const unsigned = v >>> 0;
+        if (unsigned > maxUnsigned) {
+          this.loadError = new AppError(
+            `memoryRegions[${ri}].elements[${i}] = ${v} does not fit in ${r.elementSize} byte(s)`,
+          );
+          return;
+        }
+      }
+
+      if (overlaps(r.addr, rEnd, progStart, progEnd)) {
+        this.loadError = new AppError(
+          `memoryRegions[${ri}] (${hx(r.addr)}–${hx(rEnd - 1)}) overlaps the code segment (${hx(progStart)}–${hx(progEnd - 1)})`,
+        );
+        return;
+      }
+      if (overlaps(r.addr, rEnd, stackTop, stackBase)) {
+        this.loadError = new AppError(
+          `memoryRegions[${ri}] (${hx(r.addr)}–${hx(rEnd - 1)}) overlaps the stack (${hx(stackTop)}–${hx(stackBase - 1)})`,
+        );
+        return;
+      }
+      for (let rj = 0; rj < ri; rj++) {
+        const r2 = regions[rj]!;
+        const r2End = r2.addr + r2.elements.length * r2.elementSize;
+        if (overlaps(r.addr, rEnd, r2.addr, r2End)) {
+          this.loadError = new AppError(
+            `memoryRegions[${ri}] (${hx(r.addr)}–${hx(rEnd - 1)}) overlaps memoryRegions[${rj}] (${hx(r2.addr)}–${hx(r2End - 1)})`,
+          );
+          return;
+        }
+      }
+    }
+
     const { steps, sourceToConcrete } = simulate(prog, assembled);
     const { callFramesByStep, slotLabelsByStep } = inferDisplayState(steps, assembled, prog);
 

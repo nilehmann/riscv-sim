@@ -166,6 +166,32 @@ foo:
     ret`,
   },
   {
+    name: "Global array",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 2 },
+    baseAddress: 0x8000,
+    memoryRegions: [
+      { addr: 0x10000, elementSize: 4, elements: [10, 20, 30, 40] },
+    ],
+    cCode: `\
+int arr[] = {10, 20, 30, 40};
+
+int foo(int i) {
+    arr[i] = arr[i] * 2;
+    return arr[i];
+}`,
+    assembly: `\
+foo:
+    li      a5, 0x10000
+    slli    a4, a0, 2
+    add     a5, a5, a4
+    lw      a4, 0(a5)
+    slli    a4, a4, 1
+    sw      a4, 0(a5)
+    mv      a0, a4
+    ret`,
+  },
+  {
     name: "Store a byte",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000 },

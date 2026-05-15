@@ -138,6 +138,16 @@ export function simulate(
   const osMode = prog.osMode !== false;
   const machine = new Machine(prog.initialRegs, stackBase, osMode);
 
+  for (const region of prog.memoryRegions ?? []) {
+    for (let i = 0; i < region.elements.length; i++) {
+      machine.writeMemSized(
+        region.addr + i * region.elementSize,
+        region.elements[i]!,
+        region.elementSize,
+      );
+    }
+  }
+
   let pc = labels[prog.entryPoint];
 
   const steps: Step[] = [];
