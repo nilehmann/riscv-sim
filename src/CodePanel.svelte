@@ -2,116 +2,42 @@
     import type { AssemblyResult, SourceInstr } from "./types";
     import { sim, ui } from "./state.svelte";
     import { hx, fmtConcreteRel } from "./assembler";
+    import InstrView from "./InstrView.svelte";
 
-    // ─── Highlight logic (produces HTML strings for {@html}) ─────────────
+    // ─── HTML escape (used by highlightC and infoIconHtml) ───────────────
 
     function esc(s: string): string {
         return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    function hlParsedInstr(si: SourceInstr, labels: Record<string, number>): string {
-        const p = si.parsed;
+    // ─── Concrete instruction highlighter (assembled view only) ───────────
+    // Used for expanded pseudo-instructions where we only have a formatted
+    // string (from fmtConcreteRel), not a SourceInstr.
 
-        // Extract comma-split operand texts from the raw string to preserve
-        // original notation (e.g. 0x10000 vs 65536).
-        const trimmed = si.raw.trim();
+    const REG_PAT = /^(zero|ra|sp|gp|tp|fp|[xast]\d+|t\d+|a\d+|s\d+)$/;
+
+    function hlConcreteInstr(raw: string, labels: Record<string, number>, addr: number): string {
+        const trimmed = raw.trim();
         const spIdx = trimmed.indexOf(" ");
-        const rawOps = spIdx === -1 ? [] : trimmed.slice(spIdx + 1).split(",").map(s => s.trim());
-
-        const opHtml = `<span class="kw">${esc(p.op)}</span>`;
-
-        function reg(r: string): string {
-            return `<span class="reg">${esc(r)}</span>`;
-        }
-        function imm(rawText: string): string {
-            return `<span class="imm">${esc(rawText)}</span>`;
-        }
-        function mem(rawOp: string, rs1: string): string {
-            const parenIdx = rawOp.indexOf("(");
-            const offsetText = parenIdx >= 0 ? rawOp.slice(0, parenIdx) : rawOp;
-            return `${imm(offsetText)}(${reg(rs1)})`;
-        }
-        function label(name: string): string {
-            if (name in labels) {
-                const addr = labels[name]!;
-                return `<span class="fn" data-target-addr="${addr}" data-tooltip="addr: ${hx(addr)}">${esc(name)}</span>`;
+        if (spIdx === -1) return `<span class="kw">${esc(trimmed)}</span>`;
+        const op = trimmed.slice(0, spIdx);
+        const rest = trimmed.slice(spIdx + 1);
+        const parts = rest.split(",").map(tok => {
+            const t = tok.trim();
+            if (REG_PAT.test(t)) return `<span class="reg">${esc(t)}</span>`;
+            if (/^[+-]?\d+$/.test(t) || /^0x[\da-fA-F]+$/.test(t))
+                return `<span class="imm">${esc(t)}</span>`;
+            // memory operand: 12(sp)
+            const memM = t.match(/^([^(]+)\((\w+)\)$/);
+            if (memM) return `<span class="imm">${esc(memM[1]!)}</span>(<span class="reg">${esc(memM[2]!)}</span>)`;
+            // label / target
+            if (t in labels) {
+                const tgt = labels[t]!;
+                return `<span class="fn" data-target-addr="${tgt}" data-tooltip="addr: ${hx(tgt)}">${esc(t)}</span>`;
             }
-            return `<span class="fn">${esc(name)}</span>`;
-        }
-        function join(...parts: string[]): string {
-            return parts.join(", ");
-        }
-
-        let operands: string;
-        switch (p.op) {
-            case "ret":
-            case "nop":
-                return opHtml;
-            case "li":
-            case "lui":
-                operands = join(reg(p.rd), imm(rawOps[1] ?? ""));
-                break;
-            case "mv":
-            case "neg":
-                operands = join(reg(p.rd), reg(p.rs1));
-                break;
-            case "jr":
-                operands = reg(p.rs);
-                break;
-            case "call":
-            case "j":
-                operands = label(p.target);
-                break;
-            case "jal":
-                operands = join(reg(p.rd), label(p.target));
-                break;
-            case "jalr":
-                operands = join(reg(p.rd), reg(p.rs1), imm(rawOps[2] ?? ""));
-                break;
-            case "addi":
-            case "andi":
-            case "ori":
-            case "xori":
-            case "slli":
-            case "srli":
-            case "srai":
-                operands = join(reg(p.rd), reg(p.rs1), imm(rawOps[2] ?? ""));
-                break;
-            case "add":
-            case "sub":
-            case "mul":
-            case "div":
-            case "rem":
-            case "and":
-            case "or":
-            case "xor":
-            case "sll":
-            case "srl":
-            case "sra":
-                operands = join(reg(p.rd), reg(p.rs1), reg(p.rs2));
-                break;
-            case "sw":
-            case "sh":
-            case "sb":
-                operands = join(reg(p.rs2), mem(rawOps[1] ?? "", p.rs1));
-                break;
-            case "lw":
-            case "lh":
-            case "lb":
-            case "lhu":
-            case "lbu":
-                operands = join(reg(p.rd), mem(rawOps[1] ?? "", p.rs1));
-                break;
-            case "beq":
-            case "bne":
-            case "blt":
-            case "bge":
-            case "bltu":
-            case "bgeu":
-                operands = join(reg(p.rs1), reg(p.rs2), label(p.target));
-                break;
-        }
-        return `${opHtml} ${operands}`;
+            return `<span class="fn">${esc(t)}</span>`;
+        });
+        return `<span class="kw">${esc(op)}</span> ${parts.join(", ")}`;
     }
 
     // ─── C syntax highlighter ─────────────────────────────────────────────
@@ -336,11 +262,10 @@
                             {@const tipContent = si.concretes.map((c, i) =>
                                 fmtConcreteRel(c, si.firstAddr + i * 4)
                             ).join("\n")}
-                            {@const instrHtml = hlParsedInstr(si, sim.assembled!.labels)}
                             <div class="line" id="al-{si.firstAddr.toString(16)}">
                                 <span class="pc-arrow">▶</span>
                                 <span class="asm-addr">{hx(si.firstAddr)}</span>
-                                <span class="instr-span">  {@html instrHtml}</span>
+                                <span class="instr-span">  <InstrView {si} labels={sim.assembled!.labels} /></span>
                                 {@html infoIconHtml(tipContent)}
                             </div>
                         {/each}
@@ -362,7 +287,7 @@
                             {#if si.concretes.length === 1}
                                 {@const c = si.concretes[0]!}
                                 {@const ciAddr = si.firstAddr}
-                                {@const instrHtml = hlInstrHtml(fmtConcreteRel(c, ciAddr), sim.assembled!.labels, ciAddr)}
+                                {@const instrHtml = hlConcreteInstr(fmtConcreteRel(c, ciAddr), sim.assembled!.labels, ciAddr)}
                                 <div class="line" id="al-{ciAddr.toString(16)}">
                                     <span class="pc-arrow">▶</span>
                                     <span class="asm-addr">{hx(ciAddr)}</span>
@@ -373,7 +298,7 @@
                                 <div class="concrete-group">
                                     {#each si.concretes as c, i}
                                         {@const ciAddr = si.firstAddr + i * 4}
-                                        {@const instrHtml = hlInstrHtml(fmtConcreteRel(c, ciAddr), sim.assembled!.labels, ciAddr)}
+                                        {@const instrHtml = hlConcreteInstr(fmtConcreteRel(c, ciAddr), sim.assembled!.labels, ciAddr)}
                                         <div class="line" id="al-{ciAddr.toString(16)}">
                                             <span class="pc-arrow">▶</span>
                                             <span class="asm-addr">{hx(ciAddr)}</span>
