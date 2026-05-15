@@ -2,6 +2,7 @@
     import type { FrameInfo, Step } from "./types";
     import { sim, ui } from "./state.svelte";
     import { hx } from "./assembler";
+    import { subSlots } from "./memUtils";
     import HexValue from "./HexValue.svelte";
 
     // ─── Constants ────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@
         const key = `stack-${addr.toString(16)}`;
         const mode = ui.slotViewMode.get(key) ?? 'word';
         if (mode !== 'word') {
-            return el.querySelector('.sub-slot') ?? el;
+            return el.querySelector(`.sub-slot[data-addr="${addr}"]`) ?? el;
         }
         return el;
     }
@@ -171,10 +172,9 @@
             const mode = ui.slotViewMode.get(key) ?? 'word';
 
             if (mode !== 'word') {
-                const subSize = mode === 'byte' ? 1 : 2;
                 const subSlotDivs = el.querySelectorAll('.sub-slot');
-                subSlotDivs.forEach((subEl, si) => {
-                    const subAddr = addr + si * subSize;
+                subSlotDivs.forEach((subEl) => {
+                    const subAddr = parseInt(subEl.getAttribute('data-addr') ?? '0', 10);
                     const offset = subAddr - _sp;
                     if (offset === 0 || Math.abs(offset) > OFFSET_MAX) return;
                     const sign = offset > 0 ? "+" : "";
@@ -209,16 +209,6 @@
             (((b2 ?? 0) & 0xff) << 16) |
             (((b3 ?? 0) & 0xff) << 24)
         );
-    }
-
-    function subSlots(addr: number, mode: 'halfword' | 'byte') {
-        const subSize: 1 | 2 = mode === 'byte' ? 1 : 2;
-        const count = 4 / subSize;
-        return Array.from({ length: count }, (_, i) => ({
-            addr: addr + i * subSize,
-            size: subSize as 1 | 2,
-            offset: i * subSize,
-        }));
     }
 
     function slotMode(key: string): 'word' | 'halfword' | 'byte' {
@@ -353,10 +343,10 @@
                                         >
                                     {:else}
                                         <div class="sub-slots-col">
-                                            {#each subSlots(addr, mode) as sub, si}
+                                            {#each subSlots(addr, 4, mode).toReversed() as sub, si}
                                                 {@const subVal = step?.mem.get(sub.addr)}
                                                 {@const subLabel = si === 0 ? label : null}
-                                                <div class="sub-slot">
+                                                <div class="sub-slot" data-addr={sub.addr}>
                                                     <span
                                                         class="slot-name"
                                                         style={subLabel ? "color:var(--blue)" : ""}
