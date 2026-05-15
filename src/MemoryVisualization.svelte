@@ -1,11 +1,11 @@
 <script lang="ts">
   import type { MemoryRegion } from "./types";
-  import { sim } from "./state.svelte";
+  import { sim, ui } from "./state.svelte";
   import { hx } from "./assembler";
   import HexValue from "./HexValue.svelte";
 
-  function isHighlighted(elemAddr: number): boolean {
-    const wordAddr = elemAddr & ~3;
+  function isHighlighted(addr: number): boolean {
+    const wordAddr = addr & ~3;
     return sim.currentStep?.hiSlots.includes(wordAddr) ?? false;
   }
 
@@ -21,6 +21,31 @@
       : 0xffffffff;
     return val & mask;
   }
+
+  function readBytes(mem: Map<number, number>, addr: number, bytes: 1 | 2 | 4): number {
+    let val = 0;
+    for (let i = 0; i < bytes; i++) val |= ((mem.get(addr + i) ?? 0) & 0xff) << (i * 8);
+    return val;
+  }
+
+  function subSlots(addr: number, nativeBytes: 1 | 2 | 4, mode: 'halfword' | 'byte') {
+    const subSize: 1 | 2 = mode === 'byte' ? 1 : 2;
+    const count = nativeBytes / subSize;
+    return Array.from({ length: count }, (_, i) => ({
+      addr: addr + i * subSize,
+      size: subSize as 1 | 2,
+    }));
+  }
+
+  function slotMode(key: string, def: 'word' | 'halfword' | 'byte'): 'word' | 'halfword' | 'byte' {
+    return ui.slotViewMode.get(key) ?? def;
+  }
+
+  function setSlotMode(key: string, mode: 'word' | 'halfword' | 'byte') {
+    const next = new Map(ui.slotViewMode);
+    next.set(key, mode);
+    ui.slotViewMode = next;
+  }
 </script>
 
 {#if sim.program?.memoryRegions?.length}
@@ -30,12 +55,41 @@
         <div class="region-slots">
           {#each region.elements as _, i}
             {@const elemAddr = region.addr + i * region.elementSize}
+            {@const nativeSize = region.elementSize}
+            {@const key = `mem-${region.addr}-${i}`}
+            {@const defaultMode = nativeSize === 4 ? 'word' : nativeSize === 2 ? 'halfword' : 'byte'}
+            {@const mode = slotMode(key, defaultMode)}
             <div class="region-slot" class:hi={isHighlighted(elemAddr)}>
               <div class="slot-meta">
-                <span class="slot-addr">{hx(elemAddr)}</span>
-                <span class="slot-idx">[{i}]</span>
+                {#if nativeSize > 1}
+                  <select
+                    class="slot-select"
+                    value={mode}
+                    onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
+                  >
+                    {#if nativeSize === 4}<option value="word">w</option>{/if}
+                    <option value="halfword">h</option>
+                    <option value="byte">b</option>
+                  </select>
+                {/if}
+                {#if mode === defaultMode}
+                  <span class="slot-addr">{hx(elemAddr)}</span>
+                  <span class="slot-idx">[{i}]</span>
+                {:else}
+                  {#each subSlots(elemAddr, nativeSize, mode) as sub}
+                    <div class="sub-slot">
+                      <span class="sub-addr">{hx(sub.addr)}</span>
+                      <HexValue
+                        value={readBytes(sim.currentStep?.mem ?? new Map(), sub.addr, sub.size)}
+                        elementSize={sub.size}
+                      />
+                    </div>
+                  {/each}
+                {/if}
               </div>
-              <HexValue value={readElement(region, i)} elementSize={region.elementSize} />
+              {#if mode === defaultMode}
+                <HexValue value={readElement(region, i)} elementSize={nativeSize} />
+              {/if}
             </div>
           {/each}
         </div>
@@ -58,9 +112,10 @@
     flex-direction: column;
     border: 1px solid var(--border);
   }
-.region-slots {
+  .region-slots {
     display: flex;
     flex-direction: row;
+    align-items: flex-start;
   }
   .region-slot {
     display: flex;
@@ -92,7 +147,6 @@
   }
   .slot-meta {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     width: 100%;
     margin-bottom: 4px;
@@ -108,6 +162,26 @@
   .slot-idx {
     font-family: var(--mono);
     font-size: 12px;
+    color: var(--text-faint);
+  }
+  .slot-select {
+    font-size: 10px;
+    padding: 1px 2px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+    color: var(--text-faint);
+    cursor: pointer;
+  }
+  .sub-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .sub-addr {
+    font-family: var(--mono);
+    font-size: 11px;
     color: var(--text-faint);
   }
 </style>

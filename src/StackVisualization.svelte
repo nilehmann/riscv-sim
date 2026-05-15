@@ -186,6 +186,26 @@
         );
     }
 
+    function subSlots(addr: number, mode: 'halfword' | 'byte') {
+        const subSize: 1 | 2 = mode === 'byte' ? 1 : 2;
+        const count = 4 / subSize;
+        return Array.from({ length: count }, (_, i) => ({
+            addr: addr + i * subSize,
+            size: subSize as 1 | 2,
+            offset: i * subSize,
+        }));
+    }
+
+    function slotMode(key: string): 'word' | 'halfword' | 'byte' {
+        return ui.slotViewMode.get(key) ?? 'word';
+    }
+
+    function setSlotMode(key: string, mode: 'word' | 'halfword' | 'byte') {
+        const next = new Map(ui.slotViewMode);
+        next.set(key, mode);
+        ui.slotViewMode = next;
+    }
+
 </script>
 
 <div class="stack-area scrollable">
@@ -239,7 +259,10 @@
                             style="opacity:{row.opacity}"
                             use:registerSlotAction={row.addr}
                         >
-                            <span class="slot-name">{hx(row.addr)}</span>
+                            <div class="slot-header">
+                                <select class="slot-select" disabled style="visibility:hidden"><option>w</option></select>
+                                <span class="slot-name">{hx(row.addr)}</span>
+                            </div>
                             <span class="slot-uninit">—</span>
                         </div>
                     {/each}
@@ -249,10 +272,11 @@
                         id="slot-{callerBase.toString(16)}"
                         use:registerSlotAction={callerBase}
                     >
-                        <span class="slot-name">{hx(callerBase)}</span>
-                        <span class="slot-uninit" style="color:var(--text-faint)"
-                            >—</span
-                        >
+                        <div class="slot-header">
+                            <select class="slot-select" disabled style="visibility:hidden"><option>w</option></select>
+                            <span class="slot-name">{hx(callerBase)}</span>
+                        </div>
+                        <span class="slot-uninit" style="color:var(--text-faint)">—</span>
                     </div>
                 </div>
 
@@ -275,6 +299,8 @@
                             {@const label = sim.currentSlotLabels.get(addr)}
                             {@const memVal = getSlotMemVal(addr)}
                             {@const isHi = hiS.has(addr)}
+                            {@const key = `stack-${addr.toString(16)}`}
+                            {@const mode = slotMode(key)}
                             <div
                                 class="frame-slot"
                                 class:hi={isHi}
@@ -282,17 +308,50 @@
                                 style="background:{color}"
                                 use:registerSlotAction={addr}
                             >
-                                <span
-                                    class="slot-name"
-                                    style={label ? "color:var(--blue)" : ""}
-                                    >{label
-                                        ? `${hx(addr)}  ${label}`
-                                        : hx(addr)}</span
-                                >
-                                {#if memVal !== undefined}
-                                    <HexValue value={memVal} />
-                                {:else}
-                                    <span class="slot-uninit">—</span>
+                                <div class="slot-header">
+                                    <select
+                                        class="slot-select"
+                                        value={mode}
+                                        onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
+                                    >
+                                        <option value="word">w</option>
+                                        <option value="halfword">h</option>
+                                        <option value="byte">b</option>
+                                    </select>
+                                    {#if mode === 'word'}
+                                        <span
+                                            class="slot-name"
+                                            style={label ? "color:var(--blue)" : ""}
+                                            >{label
+                                                ? `${hx(addr)}  ${label}`
+                                                : hx(addr)}</span
+                                        >
+                                    {:else}
+                                        <div class="sub-slots-col">
+                                            {#each subSlots(addr, mode) as sub, si}
+                                                {@const subVal = step?.mem.get(sub.addr)}
+                                                {@const subLabel = si === 0 ? label : null}
+                                                <div class="sub-slot">
+                                                    <span
+                                                        class="slot-name"
+                                                        style={subLabel ? "color:var(--blue)" : ""}
+                                                    >{subLabel ? `${hx(sub.addr)}  ${subLabel}` : hx(sub.addr)}</span>
+                                                    {#if subVal !== undefined}
+                                                        <HexValue value={subVal} elementSize={sub.size} />
+                                                    {:else}
+                                                        <span class="slot-uninit">—</span>
+                                                    {/if}
+                                                </div>
+                                            {/each}
+                                        </div>
+                                    {/if}
+                                </div>
+                                {#if mode === 'word'}
+                                    {#if memVal !== undefined}
+                                        <HexValue value={memVal} />
+                                    {:else}
+                                        <span class="slot-uninit">—</span>
+                                    {/if}
                                 {/if}
                             </div>
                         {/each}
@@ -307,15 +366,11 @@
                             style="opacity:{row.opacity};background:var(--bg);border-top-style:dashed"
                             use:registerSlotAction={row.addr}
                         >
-                            <span
-                                class="slot-name"
-                                style="color:var(--text-faint)"
-                                >{hx(row.addr)}</span
-                            >
-                            <span
-                                class="slot-uninit"
-                                style="color:var(--text-faint)">—</span
-                            >
+                            <div class="slot-header">
+                                <select class="slot-select" disabled style="visibility:hidden"><option>w</option></select>
+                                <span class="slot-name" style="color:var(--text-faint)">{hx(row.addr)}</span>
+                            </div>
+                            <span class="slot-uninit" style="color:var(--text-faint)">—</span>
                         </div>
                     {/each}
                     <div class="frame-ellipsis">
@@ -332,6 +387,38 @@
 </div>
 
 <style>
+    .slot-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .slot-select {
+        font-size: 10px;
+        padding: 1px 2px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        background: transparent;
+        color: var(--text-faint);
+        cursor: pointer;
+    }
+    .sub-slots-col {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex: 1;
+    }
+    .sub-slot {
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        width: 100%;
+    }
+    .sub-addr {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-faint);
+    }
     .stack-area {
         flex: 1;
         overflow-y: auto;
@@ -476,10 +563,14 @@
         font-family: var(--mono);
         font-size: 16px;
         display: flex;
+        flex-direction: row;
         justify-content: space-between;
         align-items: center;
         background: var(--surface);
         position: relative;
+    }
+    .frame-slot .slot-header:only-child {
+        flex: 1;
     }
     .frame-slot::after {
         content: "";

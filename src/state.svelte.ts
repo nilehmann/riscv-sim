@@ -41,6 +41,7 @@ export class UIState {
   /** Suppresses the CSS transition on the first fp-arrow render. Reset when fp is toggled on. */
   firstFpArrowRender = $state(true);
   selectorOpen = $state(false);
+  slotViewMode = $state<Map<string, 'word' | 'halfword' | 'byte'>>(new Map());
 }
 
 export const ui = new UIState();
@@ -218,6 +219,7 @@ export class SimulationState {
     this.asmMode = "source";
     ui.activeTab = "asm";
     ui.firstArrowRender = true;
+    ui.slotViewMode = new Map();
   }
 }
 
