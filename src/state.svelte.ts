@@ -42,6 +42,7 @@ export class UIState {
   firstFpArrowRender = $state(true);
   selectorOpen = $state(false);
   slotViewMode = $state<Map<string, 'word' | 'halfword' | 'byte'>>(new Map());
+  showGarbage = $state(true);
 }
 
 export const ui = new UIState();

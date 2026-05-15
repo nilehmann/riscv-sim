@@ -2,7 +2,7 @@
     import type { FrameInfo, Step } from "./types";
     import { sim, ui } from "./state.svelte";
     import { hx } from "./assembler";
-    import { subSlots } from "./memUtils";
+    import { subSlots, garbageWord } from "./memUtils";
     import HexValue from "./HexValue.svelte";
 
     // ─── Constants ────────────────────────────────────────────────────────
@@ -215,6 +215,10 @@
         return ui.slotViewMode.get(key) ?? 'word';
     }
 
+    const callerBaseKey = $derived(`stack-${callerBase.toString(16)}`);
+    const callerBaseMode = $derived(slotMode(callerBaseKey));
+    const callerBaseGWord = $derived(garbageWord(callerBase));
+
     function setSlotMode(key: string, mode: 'word' | 'halfword' | 'byte') {
         const next = new Map(ui.slotViewMode);
         next.set(key, mode);
@@ -268,6 +272,9 @@
                         <div>↑</div>
                     </div>
                     {#each callerGhostRows as row}
+                        {@const key = `stack-${row.addr.toString(16)}`}
+                        {@const mode = slotMode(key)}
+                        {@const gWord = garbageWord(row.addr)}
                         <div
                             class="frame-slot"
                             id="slot-{row.addr.toString(16)}"
@@ -275,10 +282,42 @@
                             use:registerSlotAction={row.addr}
                         >
                             <div class="slot-header">
-                                <select class="slot-select" disabled style="visibility:hidden"><option>w</option></select>
-                                <span class="slot-name">{hx(row.addr)}</span>
+                                <select
+                                    class="slot-select"
+                                    value={mode}
+                                    disabled={!ui.showGarbage}
+                                    onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
+                                >
+                                    <option value="word">w</option>
+                                    <option value="halfword">h</option>
+                                    <option value="byte">b</option>
+                                </select>
+                                {#if mode === 'word'}
+                                    <span class="slot-name">{hx(row.addr)}</span>
+                                {:else}
+                                    <div class="sub-slots-col">
+                                        {#each subSlots(row.addr, 4, mode).toReversed() as sub}
+                                            {@const byteOff = sub.addr - row.addr}
+                                            {@const subGarbage = (gWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
+                                            <div class="sub-slot" data-addr={sub.addr}>
+                                                <span class="slot-name">{hx(sub.addr)}</span>
+                                                {#if ui.showGarbage}
+                                                    <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
+                                                {:else}
+                                                    <span class="slot-uninit">—</span>
+                                                {/if}
+                                            </div>
+                                        {/each}
+                                    </div>
+                                {/if}
                             </div>
-                            <span class="slot-uninit">—</span>
+                            {#if mode === 'word'}
+                                {#if ui.showGarbage}
+                                    <HexValue value={gWord} faint={true} />
+                                {:else}
+                                    <span class="slot-uninit">—</span>
+                                {/if}
+                            {/if}
                         </div>
                     {/each}
                     <!-- Boundary slot at callerBase -->
@@ -288,10 +327,42 @@
                         use:registerSlotAction={callerBase}
                     >
                         <div class="slot-header">
-                            <select class="slot-select" disabled style="visibility:hidden"><option>w</option></select>
-                            <span class="slot-name">{hx(callerBase)}</span>
+                            <select
+                                class="slot-select"
+                                value={callerBaseMode}
+                                disabled={!ui.showGarbage}
+                                onchange={(e) => setSlotMode(callerBaseKey, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
+                            >
+                                <option value="word">w</option>
+                                <option value="halfword">h</option>
+                                <option value="byte">b</option>
+                            </select>
+                            {#if callerBaseMode === 'word'}
+                                <span class="slot-name">{hx(callerBase)}</span>
+                            {:else}
+                                <div class="sub-slots-col">
+                                    {#each subSlots(callerBase, 4, callerBaseMode).toReversed() as sub}
+                                        {@const byteOff = sub.addr - callerBase}
+                                        {@const subGarbage = (callerBaseGWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
+                                        <div class="sub-slot" data-addr={sub.addr}>
+                                            <span class="slot-name">{hx(sub.addr)}</span>
+                                            {#if ui.showGarbage}
+                                                <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
+                                            {:else}
+                                                <span class="slot-uninit">—</span>
+                                            {/if}
+                                        </div>
+                                    {/each}
+                                </div>
+                            {/if}
                         </div>
-                        <span class="slot-uninit" style="color:var(--text-faint)">—</span>
+                        {#if callerBaseMode === 'word'}
+                            {#if ui.showGarbage}
+                                <HexValue value={callerBaseGWord} faint={true} />
+                            {:else}
+                                <span class="slot-uninit" style="color:var(--text-faint)">—</span>
+                            {/if}
+                        {/if}
                     </div>
                 </div>
 
@@ -316,6 +387,7 @@
                             {@const isHi = hiS.has(addr)}
                             {@const key = `stack-${addr.toString(16)}`}
                             {@const mode = slotMode(key)}
+                            {@const gWord = garbageWord(addr)}
                             <div
                                 class="frame-slot"
                                 class:hi={isHi}
@@ -327,6 +399,7 @@
                                     <select
                                         class="slot-select"
                                         value={mode}
+                                        disabled={!ui.showGarbage && memVal === undefined}
                                         onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
                                     >
                                         <option value="word">w</option>
@@ -334,25 +407,20 @@
                                         <option value="byte">b</option>
                                     </select>
                                     {#if mode === 'word'}
-                                        <span
-                                            class="slot-name"
-                                            style={label ? "color:var(--blue)" : ""}
-                                            >{label
-                                                ? `${hx(addr)}  ${label}`
-                                                : hx(addr)}</span
-                                        >
+                                        <span class="slot-name">{label ? `${hx(addr)}  ${label}` : hx(addr)}</span>
                                     {:else}
                                         <div class="sub-slots-col">
                                             {#each subSlots(addr, 4, mode).toReversed() as sub, si}
                                                 {@const subVal = step?.mem.get(sub.addr)}
                                                 {@const subLabel = si === 0 ? label : null}
+                                                {@const byteOff = sub.addr - addr}
+                                                {@const subGarbage = (gWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
                                                 <div class="sub-slot" data-addr={sub.addr}>
-                                                    <span
-                                                        class="slot-name"
-                                                        style={subLabel ? "color:var(--blue)" : ""}
-                                                    >{subLabel ? `${hx(sub.addr)}  ${subLabel}` : hx(sub.addr)}</span>
+                                                    <span class="slot-name">{subLabel ? `${hx(sub.addr)}  ${subLabel}` : hx(sub.addr)}</span>
                                                     {#if subVal !== undefined}
                                                         <HexValue value={subVal} elementSize={sub.size} />
+                                                    {:else if ui.showGarbage}
+                                                        <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
                                                     {:else}
                                                         <span class="slot-uninit">—</span>
                                                     {/if}
@@ -364,6 +432,8 @@
                                 {#if mode === 'word'}
                                     {#if memVal !== undefined}
                                         <HexValue value={memVal} />
+                                    {:else if ui.showGarbage}
+                                        <HexValue value={gWord} faint={true} />
                                     {:else}
                                         <span class="slot-uninit">—</span>
                                     {/if}
@@ -376,16 +446,51 @@
                 <!-- Free zone (below sp) -->
                 <div class="frame free" id="fr-free">
                     {#each freeGhostRows as row}
+                        {@const key = `stack-${row.addr.toString(16)}`}
+                        {@const mode = slotMode(key)}
+                        {@const gWord = garbageWord(row.addr)}
                         <div
                             class="frame-slot"
                             style="opacity:{row.opacity};background:var(--bg);border-top-style:dashed"
                             use:registerSlotAction={row.addr}
                         >
                             <div class="slot-header">
-                                <select class="slot-select" disabled style="visibility:hidden"><option>w</option></select>
-                                <span class="slot-name" style="color:var(--text-faint)">{hx(row.addr)}</span>
+                                <select
+                                    class="slot-select"
+                                    value={mode}
+                                    disabled={!ui.showGarbage}
+                                    onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
+                                >
+                                    <option value="word">w</option>
+                                    <option value="halfword">h</option>
+                                    <option value="byte">b</option>
+                                </select>
+                                {#if mode === 'word'}
+                                    <span class="slot-name">{hx(row.addr)}</span>
+                                {:else}
+                                    <div class="sub-slots-col">
+                                        {#each subSlots(row.addr, 4, mode).toReversed() as sub}
+                                            {@const byteOff = sub.addr - row.addr}
+                                            {@const subGarbage = (gWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
+                                            <div class="sub-slot" data-addr={sub.addr}>
+                                                <span class="slot-name">{hx(sub.addr)}</span>
+                                                {#if ui.showGarbage}
+                                                    <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
+                                                {:else}
+                                                    <span class="slot-uninit">—</span>
+                                                {/if}
+                                            </div>
+                                        {/each}
+                                    </div>
+                                {/if}
                             </div>
-                            <span class="slot-uninit" style="color:var(--text-faint)">—</span>
+                            {#if mode === 'word'}
+                                {#if ui.showGarbage}
+                                    <HexValue value={gWord} faint={true} />
+                                {:else}
+                                    <span class="slot-uninit" style="color:var(--text-faint)">—</span>
+                                {/if}
+                            {/if}
                         </div>
                     {/each}
                     <div class="frame-ellipsis">

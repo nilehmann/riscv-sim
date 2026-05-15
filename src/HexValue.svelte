@@ -1,7 +1,7 @@
 <script lang="ts">
   import { hx } from "./assembler";
 
-  let { value, elementSize = 4 }: { value: number; elementSize?: 1 | 2 | 4 } =
+  let { value, elementSize = 4, faint = false }: { value: number; elementSize?: 1 | 2 | 4; faint?: boolean } =
     $props();
 
   const unsigned = $derived(value >>> 0);
@@ -36,12 +36,13 @@
 
 <span
   class="hex-val"
-  onmouseenter={enter}
-  onmousemove={move}
-  onmouseleave={leave}
+  class:hex-faint={faint}
+  onmouseenter={faint ? undefined : enter}
+  onmousemove={faint ? undefined : move}
+  onmouseleave={faint ? undefined : leave}
 >{hx(value, elementSize)}</span>
 
-{#if show}
+{#if show && !faint}
   <div
     class="hex-tooltip"
     bind:this={tooltipEl}
@@ -66,6 +67,12 @@
     cursor: default;
     text-decoration: underline dotted currentColor;
     text-underline-offset: 2px;
+  }
+  .hex-faint {
+    color: var(--text-faint);
+    text-decoration: none;
+    pointer-events: none;
+    opacity: 0.4;
   }
   .hex-tooltip {
     position: fixed;

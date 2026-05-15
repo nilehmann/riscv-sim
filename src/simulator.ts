@@ -53,7 +53,7 @@ export const REG_META = {
 
 // Deterministic garbage for uninitialized stack slots — looks like random
 // memory but is reproducible across runs, useful for teaching.
-function garbageValue(addr: number): number {
+export function garbageValue(addr: number): number {
   let h = Math.imul(addr ^ 0x45d9f3b, 0x9e3779b9);
   h ^= h >>> 13;
   h = Math.imul(h, 0x5c4d3215);
