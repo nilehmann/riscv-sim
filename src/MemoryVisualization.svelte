@@ -60,35 +60,44 @@
             {@const defaultMode = nativeSize === 4 ? 'word' : nativeSize === 2 ? 'halfword' : 'byte'}
             {@const mode = slotMode(key, defaultMode)}
             <div class="region-slot" class:hi={isHighlighted(elemAddr)}>
-              <div class="slot-meta">
-                {#if nativeSize > 1}
-                  <select
-                    class="slot-select"
-                    value={mode}
-                    onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
-                  >
-                    {#if nativeSize === 4}<option value="word">w</option>{/if}
-                    <option value="halfword">h</option>
-                    <option value="byte">b</option>
-                  </select>
-                {/if}
-                {#if mode === defaultMode}
+              {#if mode === defaultMode}
+                <div class="slot-meta">
+                  {#if nativeSize > 1}
+                    <select
+                      class="slot-select"
+                      value={mode}
+                      onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
+                    >
+                      {#if nativeSize === 4}<option value="word">w</option>{/if}
+                      <option value="halfword">h</option>
+                      <option value="byte">b</option>
+                    </select>
+                  {/if}
                   <span class="slot-addr">{hx(elemAddr)}</span>
                   <span class="slot-idx">[{i}]</span>
-                {:else}
-                  {#each subSlots(elemAddr, nativeSize, mode) as sub}
-                    <div class="sub-slot">
-                      <span class="sub-addr">{hx(sub.addr)}</span>
-                      <HexValue
-                        value={readBytes(sim.currentStep?.mem ?? new Map(), sub.addr, sub.size)}
-                        elementSize={sub.size}
-                      />
-                    </div>
-                  {/each}
-                {/if}
-              </div>
-              {#if mode === defaultMode}
+                </div>
                 <HexValue value={readElement(region, i)} elementSize={nativeSize} />
+              {:else}
+                <div class="expanded-grid">
+                  {#if nativeSize > 1}
+                    <select
+                      class="slot-select expanded-select"
+                      value={mode}
+                      onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
+                    >
+                      {#if nativeSize === 4}<option value="word">w</option>{/if}
+                      <option value="halfword">h</option>
+                      <option value="byte">b</option>
+                    </select>
+                  {/if}
+                  {#each subSlots(elemAddr, nativeSize, mode) as sub}
+                    <span class="sub-grid-addr">{hx(sub.addr)}</span>
+                    <HexValue
+                      value={readBytes(sim.currentStep?.mem ?? new Map(), sub.addr, sub.size)}
+                      elementSize={sub.size}
+                    />
+                  {/each}
+                </div>
               {/if}
             </div>
           {/each}
@@ -126,6 +135,7 @@
     background: var(--surface);
     position: relative;
     min-width: 140px;
+    gap: 4px;
   }
   .region-slot:last-child {
     border-right: none;
@@ -147,10 +157,10 @@
   }
   .slot-meta {
     display: flex;
+    flex-direction: row;
     align-items: center;
-    width: 100%;
-    margin-bottom: 4px;
     gap: 8px;
+    width: 100%;
     border-bottom: 1px solid var(--border);
     padding-bottom: 4px;
   }
@@ -173,15 +183,23 @@
     color: var(--text-faint);
     cursor: pointer;
   }
-  .sub-slot {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
+  .expanded-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: auto auto;
+    column-gap: 8px;
+    row-gap: 4px;
+    align-items: start;
   }
-  .sub-addr {
+  .expanded-select {
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+  .sub-grid-addr {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-faint);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
   }
 </style>
