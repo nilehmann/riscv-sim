@@ -172,6 +172,7 @@ export interface FrameInfo {
   label: string;
   entrySpBefore: number;
   allocatedSize: number;
+  returnAddr: number;
 }
 
 export interface Step {

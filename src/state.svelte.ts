@@ -60,6 +60,7 @@ export class SimulationState {
   displayRegs = $state<DisplayReg[]>([]);
   callFramesByStep = $state<FrameInfo[][]>([]);
   slotLabelsByStep = $state<Map<number, string>[]>([]);
+  inferError = $state<{ step: number; message: string } | null>(null);
   cur = $state(0);
   asmMode = $state<"source" | "assembled">("source");
   loadError = $state<AppError | null>(null);
@@ -95,7 +96,8 @@ export class SimulationState {
   // ── Actions ──
 
   goTo(idx: number): void {
-    this.cur = Math.max(0, Math.min(this.steps.length - 1, idx));
+    const max = this.inferError ? this.inferError.step : this.steps.length - 1;
+    this.cur = Math.max(0, Math.min(max, idx));
   }
 
   go(dir: number): void {
@@ -207,13 +209,14 @@ export class SimulationState {
     }
 
     const { steps, sourceToConcrete } = simulate(prog, assembled);
-    const { callFramesByStep, slotLabelsByStep } = inferDisplayState(steps, assembled, prog);
+    const { callFramesByStep, slotLabelsByStep, error } = inferDisplayState(steps, assembled, prog);
 
     this.program = prog;
     this.assembled = assembled;
     this.steps = steps;
     this.callFramesByStep = callFramesByStep;
     this.slotLabelsByStep = slotLabelsByStep;
+    this.inferError = error;
     this.sourcePositions = [0, ...sourceToConcrete];
     this.displayRegs = computeDisplayRegs(prog, assembled);
     this.cur = 0;

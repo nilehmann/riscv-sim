@@ -239,6 +239,11 @@
                 <p class="config-error-hint">{e.detail}</p>
             {/if}
         </div>
+    {:else if sim.inferError && sim.cur >= sim.inferError.step}
+        <div class="config-error">
+            <div class="config-error-title">Non-stack behavior detected</div>
+            <p>{sim.inferError.message}</p>
+        </div>
     {:else if step}
         <div class="stack-wrapper" bind:this={wrapperEl}>
             <!-- Offset labels (left of stack) -->
