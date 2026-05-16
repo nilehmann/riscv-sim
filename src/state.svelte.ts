@@ -92,6 +92,7 @@ export class SimulationState {
   currentStep = $derived(this.steps[this.cur] ?? null);
   currentCallFrames = $derived(this.callFramesByStep[this.cur] ?? []);
   currentSlotLabels = $derived(this.slotLabelsByStep[this.cur] ?? new Map<number, string>());
+  stackEnabled = $derived(this.program?.showStack !== false);
 
   // ── Actions ──
 

@@ -57,6 +57,8 @@ export interface Program {
   osMode?: boolean;
   assembly: string;
   memoryRegions?: MemoryRegion[];
+  /** When false, stack detection and visualization are disabled. Default: true */
+  showStack?: boolean;
 }
 
 export type ParsedInstr =

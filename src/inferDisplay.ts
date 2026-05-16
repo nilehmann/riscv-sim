@@ -11,7 +11,8 @@ export function inferDisplayState(
   assembled: AssemblyResult,
   prog: Program,
 ): DisplayState {
-  if (steps.length === 0) return { callFramesByStep: [], slotLabelsByStep: [], error: null };
+  if (steps.length === 0 || prog.showStack === false)
+    return { callFramesByStep: [], slotLabelsByStep: [], error: null };
 
   const { sourceInstrs, addrToSourceIdx, labels } = assembled;
 

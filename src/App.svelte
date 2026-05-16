@@ -81,7 +81,9 @@
     <CodePanel />
     <div class="center-panel">
         <MemoryVisualization />
-        <StackVisualization />
+        {#if sim.stackEnabled}
+            <StackVisualization />
+        {/if}
     </div>
     <RegisterPanel />
 </div>
