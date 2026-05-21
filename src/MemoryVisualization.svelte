@@ -4,6 +4,7 @@
   import { hx } from "./assembler";
   import { subSlots, readBytes } from "./memUtils";
   import HexValue from "./HexValue.svelte";
+  import SlotMode from "./SlotMode.svelte";
 
   function isHighlighted(addr: number): boolean {
     const wordAddr = addr & ~3;
@@ -41,15 +42,7 @@
               {#if mode === defaultMode}
                 <div class="slot-meta">
                   {#if nativeSize > 1}
-                    <select
-                      class="slot-select"
-                      value={mode}
-                      onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
-                    >
-                      {#if nativeSize === 4}<option value="word">w</option>{/if}
-                      <option value="halfword">h</option>
-                      <option value="byte">b</option>
-                    </select>
+                    <SlotMode {mode} showWord={nativeSize === 4} onchange={(m) => setSlotMode(key, m)} />
                   {/if}
                   <span class="slot-addr">{hx(elemAddr)}</span>
                   <span class="slot-idx">[{i}]</span>
@@ -60,15 +53,7 @@
               {:else}
                 <div class="slot-expanded">
                   {#if nativeSize > 1}
-                    <select
-                      class="slot-select"
-                      value={mode}
-                      onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
-                    >
-                      {#if nativeSize === 4}<option value="word">w</option>{/if}
-                      <option value="halfword">h</option>
-                      <option value="byte">b</option>
-                    </select>
+                    <SlotMode {mode} showWord={nativeSize === 4} onchange={(m) => setSlotMode(key, m)} />
                   {/if}
                   <div class="pairs-grid">
                     {#each subSlots(elemAddr, nativeSize, mode) as sub}
@@ -158,15 +143,7 @@
     font-size: 12px;
     color: var(--text-faint);
   }
-  .slot-select {
-    font-size: 10px;
-    padding: 1px 2px;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    background: var(--surface);
-    color: var(--text-faint);
-    cursor: pointer;
-  }
+
   .word-val {
     display: flex;
     justify-content: flex-end;

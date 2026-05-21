@@ -4,6 +4,7 @@
     import { hx } from "./assembler";
     import { subSlots, garbageWord } from "./memUtils";
     import HexValue from "./HexValue.svelte";
+    import SlotMode from "./SlotMode.svelte";
 
     // ─── Constants ────────────────────────────────────────────────────────
     const FRAME_COLORS = [
@@ -287,16 +288,7 @@
                             use:registerSlotAction={row.addr}
                         >
                             <div class="slot-header">
-                                <select
-                                    class="slot-select"
-                                    value={mode}
-                                    disabled={!ui.showGarbage}
-                                    onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
-                                >
-                                    <option value="word">w</option>
-                                    <option value="halfword">h</option>
-                                    <option value="byte">b</option>
-                                </select>
+                                <SlotMode {mode} disabled={!ui.showGarbage} transparent onchange={(m) => setSlotMode(key, m)} />
                                 {#if mode === 'word'}
                                     <span class="slot-name">{hx(row.addr)}</span>
                                 {:else}
@@ -332,16 +324,7 @@
                         use:registerSlotAction={callerBase}
                     >
                         <div class="slot-header">
-                            <select
-                                class="slot-select"
-                                value={callerBaseMode}
-                                disabled={!ui.showGarbage}
-                                onchange={(e) => setSlotMode(callerBaseKey, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
-                            >
-                                <option value="word">w</option>
-                                <option value="halfword">h</option>
-                                <option value="byte">b</option>
-                            </select>
+                            <SlotMode mode={callerBaseMode} disabled={!ui.showGarbage} transparent onchange={(m) => setSlotMode(callerBaseKey, m)} />
                             {#if callerBaseMode === 'word'}
                                 <span class="slot-name">{hx(callerBase)}</span>
                             {:else}
@@ -401,16 +384,7 @@
                                 use:registerSlotAction={addr}
                             >
                                 <div class="slot-header">
-                                    <select
-                                        class="slot-select"
-                                        value={mode}
-                                        disabled={!ui.showGarbage && memVal === undefined}
-                                        onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
-                                    >
-                                        <option value="word">w</option>
-                                        <option value="halfword">h</option>
-                                        <option value="byte">b</option>
-                                    </select>
+                                    <SlotMode {mode} disabled={!ui.showGarbage && memVal === undefined} transparent onchange={(m) => setSlotMode(key, m)} />
                                     {#if mode === 'word'}
                                         <span class="slot-name">{label ? `${hx(addr)}  ${label}` : hx(addr)}</span>
                                     {:else}
@@ -460,16 +434,7 @@
                             use:registerSlotAction={row.addr}
                         >
                             <div class="slot-header">
-                                <select
-                                    class="slot-select"
-                                    value={mode}
-                                    disabled={!ui.showGarbage}
-                                    onchange={(e) => setSlotMode(key, e.currentTarget.value as 'word' | 'halfword' | 'byte')}
-                                >
-                                    <option value="word">w</option>
-                                    <option value="halfword">h</option>
-                                    <option value="byte">b</option>
-                                </select>
+                                <SlotMode {mode} disabled={!ui.showGarbage} transparent onchange={(m) => setSlotMode(key, m)} />
                                 {#if mode === 'word'}
                                     <span class="slot-name">{hx(row.addr)}</span>
                                 {:else}
@@ -517,15 +482,7 @@
         align-items: flex-start;
         gap: 8px;
     }
-    .slot-select {
-        font-size: 10px;
-        padding: 1px 2px;
-        border: 1px solid var(--border);
-        border-radius: 3px;
-        background: transparent;
-        color: var(--text-faint);
-        cursor: pointer;
-    }
+
     .sub-slots-col {
         display: flex;
         flex-direction: column;
