@@ -1,12 +1,12 @@
 <script lang="ts">
-    import { untrack } from "svelte";
+    import { tick, untrack } from "svelte";
     import { EditorView, basicSetup } from "codemirror";
     import { Compartment } from "@codemirror/state";
     import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
     import { tags } from "@lezer/highlight";
     import { oneDark } from "@codemirror/theme-one-dark";
     import { vim } from "@replit/codemirror-vim";
-    import type { Program } from "./types";
+    import type { Program, MemoryRegion } from "./types";
     import { ALL_REGS, isReg } from "./types";
     import { sim, ui } from "./state.svelte";
 
@@ -103,6 +103,17 @@
     let showStack = $state(sim.program?.showStack ?? false);
     let stackBase = $state("0x" + (sim.program?.stackBase ?? DEFAULT_STACK_BASE).toString(16));
     let stackSp   = $state("0x" + (sim.program?.initialRegs?.sp ?? DEFAULT_SP).toString(16));
+
+    type RegionRow = { addr: string; elementSize: 1 | 2 | 4; elements: string[] };
+    let scrollEls: (HTMLElement | null)[] = [];
+    let regions = $state<RegionRow[]>(
+        (sim.program?.memoryRegions ?? []).map(r => ({
+            addr: "0x" + r.addr.toString(16),
+            elementSize: r.elementSize,
+            elements: r.elements.map(e => "0x" + e.toString(16)),
+        }))
+    );
+
     let loadError = $state<string | null>(null);
     let editorContainer = $state<HTMLElement | null>(null);
 
@@ -174,6 +185,21 @@
         regs = regs.filter((_, idx) => idx !== i);
     }
 
+    function addRegion() {
+        regions = [...regions, { addr: "0x10000", elementSize: 4, elements: ["0x0"] }];
+    }
+    function removeRegion(i: number) {
+        regions = regions.filter((_, idx) => idx !== i);
+    }
+    async function addElement(ri: number) {
+        regions[ri]!.elements = [...regions[ri]!.elements, "0x0"];
+        await tick();
+        scrollEls[ri]?.scrollTo({ top: scrollEls[ri]!.scrollHeight });
+    }
+    function removeElement(ri: number, ei: number) {
+        regions[ri]!.elements = regions[ri]!.elements.filter((_, idx) => idx !== ei);
+    }
+
     function handleWrapperMousedown(e: MouseEvent) {
         if (!viewRef) return;
         if (!viewRef.contentDOM.contains(e.target as Node)) {
@@ -214,7 +240,25 @@
             if (isNaN(parsedStackSp)) { loadError = "Invalid stack pointer value"; return; }
             initialRegs["sp"] = parsedStackSp;
         }
-        const prog: Program = { name, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase };
+        const memoryRegions: MemoryRegion[] = [];
+        for (let ri = 0; ri < regions.length; ri++) {
+            const r = regions[ri]!;
+            const addr = parseInt(r.addr);
+            if (isNaN(addr)) { loadError = `Region ${ri + 1}: invalid address`; return; }
+            const maxVal = r.elementSize === 4 ? 0xffffffff : (1 << (r.elementSize * 8)) - 1;
+            const elements: number[] = [];
+            for (let ei = 0; ei < r.elements.length; ei++) {
+                const v = parseInt(r.elements[ei]!);
+                if (isNaN(v)) { loadError = `Region ${ri + 1}, element ${ei}: invalid value`; return; }
+                if ((v >>> 0) > maxVal) {
+                    loadError = `Region ${ri + 1}, element ${ei}: ${v} does not fit in ${r.elementSize} byte(s)`;
+                    return;
+                }
+                elements.push(v);
+            }
+            memoryRegions.push({ addr, elementSize: r.elementSize, elements });
+        }
+        const prog: Program = { name, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase, memoryRegions };
         sim.loadProgram(prog);
         if (sim.loadError) {
             loadError = sim.loadError.message + (sim.loadError.detail ? `\n${sim.loadError.detail}` : "");
@@ -301,6 +345,41 @@
                     </div>
                 </div>
             {/if}
+
+            <!-- Memory regions -->
+            <div class="field">
+                <label class="field-label">Memory regions</label>
+                <div class="regions-list">
+                    {#each regions as region, ri}
+                        <div class="region-card">
+                            <div class="region-header">
+                                <input class="input mono region-addr" bind:value={region.addr} placeholder="0x10000" />
+                                <div class="size-group">
+                                    {#each [1, 2, 4] as sz}
+                                        <button
+                                            class="size-btn"
+                                            class:active={region.elementSize === sz}
+                                            onclick={() => (region.elementSize = sz as 1|2|4)}
+                                        >{sz}B</button>
+                                    {/each}
+                                </div>
+                                <button class="remove-btn" onclick={() => removeRegion(ri)}>×</button>
+                            </div>
+                            <div class="elements-scroll" bind:this={scrollEls[ri]}>
+                                {#each region.elements as _, ei}
+                                    <div class="elem-row">
+                                        <span class="elem-idx mono">[{ei}]</span>
+                                        <input class="input mono elem-val" bind:value={region.elements[ei]} placeholder="0x0" />
+                                        <button class="remove-btn" onclick={() => removeElement(ri, ei)}>×</button>
+                                    </div>
+                                {/each}
+                            </div>
+                            <button class="add-reg-btn" onclick={() => addElement(ri)}>+ Add element</button>
+                        </div>
+                    {/each}
+                    <button class="add-reg-btn" onclick={addRegion}>+ Add region</button>
+                </div>
+            </div>
 
             {#if loadError}
                 <div class="error-box">{loadError}</div>
@@ -541,5 +620,69 @@
     }
     .btn-load:hover {
         opacity: 0.9;
+    }
+    .regions-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .region-card {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+    .region-header {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+    .region-addr {
+        flex: 1;
+    }
+    .size-group {
+        display: flex;
+        gap: 2px;
+    }
+    .size-btn {
+        padding: 4px 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--surface);
+        color: var(--text-dim);
+        font-family: var(--mono);
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .size-btn.active {
+        background: var(--blue-dim);
+        border-color: var(--blue);
+        color: var(--blue);
+        font-weight: 600;
+    }
+    .elements-scroll {
+        max-height: 10rem;
+        overflow-y: auto;
+        direction: rtl;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .elem-row {
+        direction: ltr;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+    .elem-idx {
+        flex: 0 0 2.5rem;
+        font-size: 12px;
+        color: var(--text-faint);
+        text-align: right;
+    }
+    .elem-val {
+        flex: 1;
     }
 </style>
