@@ -12,7 +12,7 @@ function computeDisplayRegs(
   assembled: AssemblyResult,
 ): DisplayReg[] {
   const { sourceInstrs } = assembled;
-  const used = new Set(["sp", "ra"]);
+  const used = new Set<string>();
   for (const r of Object.keys(prog.initialRegs)) used.add(r);
   for (const si of sourceInstrs) {
     for (const c of si.concretes) {

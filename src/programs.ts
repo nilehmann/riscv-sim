@@ -6,6 +6,7 @@ export const PROGRAMS: Program[] = [
     initialRegs: {},
     baseAddress: 0x8000,
     assembly: "",
+    showStack: false,
   },
   {
     name: "baz -> foo",

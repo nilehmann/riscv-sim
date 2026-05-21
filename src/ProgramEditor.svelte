@@ -81,15 +81,28 @@
 
     // ── Component state ───────────────────────────────────────────────────────
 
+    const DEFAULT_STACK_BASE = 0xc0000000;
+    const DEFAULT_SP = 0xbfffff00;
+
     let name = $state(sim.program?.name ?? "");
     let entryPoint = $state(sim.program?.entryPoint ?? "");
     let baseAddress = $state("0x" + (sim.program?.baseAddress ?? 0x8000).toString(16));
     let assembly = $state(sim.program?.assembly ?? "");
     let regs = $state<Array<{ reg: string; val: string }>>(
-        Object.entries(sim.program?.initialRegs ?? { sp: 0xbfffff00, ra: 0x8050 }).map(
-            ([reg, val]) => ({ reg, val: "0x" + val.toString(16) }),
-        ),
+        Object.entries(
+            (() => {
+                const ir = sim.program?.initialRegs;
+                const defaults: Record<string, number> = { sp: DEFAULT_SP, ra: 0x8050 };
+                if (!ir) return sim.program?.showStack ? { ra: 0x8050 } : defaults;
+                return sim.program.showStack
+                    ? Object.fromEntries(Object.entries(ir).filter(([k]) => k !== "sp"))
+                    : ir;
+            })()
+        ).map(([reg, val]) => ({ reg, val: "0x" + (val as number).toString(16) }))
     );
+    let showStack = $state(sim.program?.showStack ?? false);
+    let stackBase = $state("0x" + (sim.program?.stackBase ?? DEFAULT_STACK_BASE).toString(16));
+    let stackSp   = $state("0x" + (sim.program?.initialRegs?.sp ?? DEFAULT_SP).toString(16));
     let loadError = $state<string | null>(null);
     let editorContainer = $state<HTMLElement | null>(null);
 
@@ -98,7 +111,7 @@
         const errors = new Set<number>();
         for (let i = 0; i < regs.length; i++) {
             const reg = regs[i]!.reg.trim();
-            if (!isReg(reg)) {
+            if (!isReg(reg) || reg === "zero" || (showStack && reg === "sp")) {
                 errors.add(i);
             } else if (seen.has(reg)) {
                 errors.add(i);
@@ -152,7 +165,8 @@
 
     function addReg() {
         const used = new Set(regs.map((r) => r.reg));
-        const next = ALL_REGS.find((r) => !used.has(r)) ?? ALL_REGS[0]!;
+        const forbidden = new Set(["zero", ...(showStack ? ["sp"] : [])]);
+        const next = ALL_REGS.find((r) => !used.has(r) && !forbidden.has(r)) ?? ALL_REGS[0]!;
         regs = [...regs, { reg: next, val: "0x0" }];
     }
 
@@ -192,7 +206,15 @@
             }
             initialRegs[reg] = v;
         }
-        const prog: Program = { name, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly };
+        let parsedStackBase: number | undefined;
+        if (showStack) {
+            parsedStackBase = parseInt(stackBase);
+            if (isNaN(parsedStackBase)) { loadError = "Invalid stack base address"; return; }
+            const parsedStackSp = parseInt(stackSp);
+            if (isNaN(parsedStackSp)) { loadError = "Invalid stack pointer value"; return; }
+            initialRegs["sp"] = parsedStackSp;
+        }
+        const prog: Program = { name, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase };
         sim.loadProgram(prog);
         if (sim.loadError) {
             loadError = sim.loadError.message + (sim.loadError.detail ? `\n${sim.loadError.detail}` : "");
@@ -238,7 +260,7 @@
             <div class="field">
                 <label class="field-label">Initial registers</label>
                 <datalist id="regs-list-dl">
-                    {#each ALL_REGS as r}<option value={r}></option>{/each}
+                    {#each ALL_REGS.filter(r => r !== "zero" && !(showStack && r === "sp")) as r}<option value={r}></option>{/each}
                 </datalist>
                 <div class="regs-list">
                     {#each regs as row, i}
@@ -257,6 +279,28 @@
                     <button class="add-reg-btn" onclick={addReg}>+ Add register</button>
                 </div>
             </div>
+
+            <div class="toggle-row">
+                <span class="toggle-label">Show stack</span>
+                <button
+                    class="toggle-btn"
+                    class:active={showStack}
+                    onclick={() => (showStack = !showStack)}
+                >{showStack ? "On" : "Off"}</button>
+            </div>
+
+            {#if showStack}
+                <div class="row2">
+                    <div class="field">
+                        <label class="field-label">Stack base</label>
+                        <input class="input mono" bind:value={stackBase} placeholder="0xc0000000" />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Stack pointer (sp)</label>
+                        <input class="input mono" bind:value={stackSp} placeholder="0xbfffff00" />
+                    </div>
+                </div>
+            {/if}
 
             {#if loadError}
                 <div class="error-box">{loadError}</div>
@@ -431,6 +475,37 @@
     .add-reg-btn:hover {
         border-color: var(--text-dim);
         color: var(--text);
+    }
+    .toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .toggle-label {
+        font-family: var(--sans);
+        font-size: 13px;
+        color: var(--text);
+    }
+    .toggle-btn {
+        padding: 4px 14px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--text-dim);
+        font-family: var(--sans);
+        font-size: 13px;
+        cursor: pointer;
+        min-width: 48px;
+    }
+    .toggle-btn:hover {
+        border-color: var(--text-faint);
+        color: var(--text);
+    }
+    .toggle-btn.active {
+        background: var(--blue-dim);
+        border-color: var(--blue);
+        color: var(--blue);
+        font-weight: 600;
     }
     .error-box {
         background: var(--red-dim);
