@@ -43,6 +43,10 @@ export class UIState {
   selectorOpen = $state(false);
   slotViewMode = $state<Map<string, 'word' | 'halfword' | 'byte'>>(new Map());
   showGarbage = $state(true);
+  theme = $state<'light' | 'dark' | 'system'>(
+    (localStorage.getItem('theme') as 'light' | 'dark' | 'system') ?? 'system'
+  );
+  showSettings = $state(false);
 }
 
 export const ui = new UIState();

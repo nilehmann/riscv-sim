@@ -4,6 +4,22 @@
     import MemoryVisualization from "./MemoryVisualization.svelte";
     import RegisterPanel from "./RegisterPanel.svelte";
     import Controls from "./Controls.svelte";
+    import Settings from "./Settings.svelte";
+    import { sim, ui } from "./state.svelte";
+
+    const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
+
+    $effect(() => {
+        localStorage.setItem('theme', ui.theme);
+        const apply = () => {
+            const effective =
+                ui.theme === 'system' ? (darkMQ.matches ? 'dark' : 'light') : ui.theme;
+            document.documentElement.dataset.theme = effective;
+        };
+        apply();
+        darkMQ.addEventListener('change', apply);
+        return () => darkMQ.removeEventListener('change', apply);
+    });
 
     let tooltipEl = $state<HTMLElement | null>(null);
     let tooltipText = $state("");
@@ -75,7 +91,12 @@
 <!-- App layout -->
 <header class="app-header">
     <span class="app-title">RISC-V Simulator</span>
+    <button class="settings-btn" onclick={() => (ui.showSettings = true)} data-tooltip="Settings">⚙</button>
 </header>
+
+{#if ui.showSettings}
+    <Settings />
+{/if}
 
 <div class="main">
     <CodePanel />
@@ -120,6 +141,19 @@
         font-weight: 600;
         color: var(--text-dim);
         letter-spacing: 0.03em;
+        flex: 1;
+    }
+    .settings-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 16px;
+        color: var(--text-faint);
+        padding: 0 2px;
+        line-height: 1;
+    }
+    .settings-btn:hover {
+        color: var(--text-dim);
     }
     .main {
         flex: 1;
@@ -170,6 +204,25 @@
         --purple-dim: rgba(130, 80, 223, 0.1);
         --mono: "IBM Plex Mono", monospace;
         --sans: "IBM Plex Sans", sans-serif;
+    }
+    :global([data-theme="dark"]) {
+        --bg: #0d1117;
+        --surface: #161b22;
+        --surface2: #21262d;
+        --border: #30363d;
+        --text: #e6edf3;
+        --text-dim: #8b949e;
+        --text-faint: #6e7681;
+        --green: #3fb950;
+        --green-dim: rgba(63, 185, 80, 0.1);
+        --blue: #58a6ff;
+        --blue-dim: rgba(88, 166, 255, 0.1);
+        --orange: #d29922;
+        --orange-dim: rgba(210, 153, 34, 0.12);
+        --red: #f85149;
+        --red-dim: rgba(248, 81, 73, 0.1);
+        --purple: #bc8cff;
+        --purple-dim: rgba(188, 140, 255, 0.1);
     }
     :global([data-tooltip]) {
         cursor: default;
