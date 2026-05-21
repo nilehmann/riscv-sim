@@ -76,7 +76,7 @@
     // ── Component state ───────────────────────────────────────────────────────
 
     let name = $state(sim.program?.name ?? "");
-    let entryPoint = $state(sim.program?.entryPoint ?? "main");
+    let entryPoint = $state(sim.program?.entryPoint ?? "");
     let baseAddress = $state("0x" + (sim.program?.baseAddress ?? 0x8000).toString(16));
     let assembly = $state(sim.program?.assembly ?? "");
     let regs = $state<Array<{ reg: string; val: string }>>(
@@ -154,7 +154,7 @@
             }
             initialRegs[reg] = v;
         }
-        const prog: Program = { name, entryPoint, baseAddress: parsedBase, initialRegs, assembly };
+        const prog: Program = { name, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly };
         sim.loadProgram(prog);
         if (sim.loadError) {
             loadError = sim.loadError.message + (sim.loadError.detail ? `\n${sim.loadError.detail}` : "");
@@ -182,7 +182,7 @@
                 </div>
                 <div class="field">
                     <label class="field-label">Entry point</label>
-                    <input class="input mono" bind:value={entryPoint} placeholder="main" />
+                    <input class="input mono" bind:value={entryPoint} placeholder="optional — first instruction" />
                 </div>
                 <div class="field field-narrow">
                     <label class="field-label">Base address</label>

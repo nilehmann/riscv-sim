@@ -145,7 +145,7 @@ export class SimulationState {
       return;
     }
 
-    if (!(prog.entryPoint in assembled.labels)) {
+    if (prog.entryPoint && !(prog.entryPoint in assembled.labels)) {
       this.loadError = new AppError(
         `Entry point '${prog.entryPoint}' not found`,
         `Available labels: ${Object.keys(assembled.labels).join(", ")}`,

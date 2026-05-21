@@ -23,7 +23,7 @@ export function inferDisplayState(
 
   const callStack: FrameInfo[] = [
     {
-      label: prog.entryPoint,
+      label: prog.entryPoint ?? "(start)",
       entrySpBefore: steps[0]!.regs.sp,
       allocatedSize: 0,
       returnAddr: steps[0]!.regs.ra,

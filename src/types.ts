@@ -48,7 +48,7 @@ export interface MemoryRegion {
 export interface Program {
   name: string;
   cCode?: string;
-  entryPoint: string;
+  entryPoint?: string;
   initialRegs: Record<string, number>;
   baseAddress: number;
   /** Top of the stack (stack grows down from here). Default: 0xC0000000 */

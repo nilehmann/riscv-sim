@@ -149,7 +149,7 @@ export function simulate(
     }
   }
 
-  let pc = labels[prog.entryPoint];
+  let pc = prog.entryPoint ? labels[prog.entryPoint]! : prog.baseAddress;
 
   const steps: Step[] = [];
   const sourceToConcrete: number[] = [];
