@@ -1,7 +1,10 @@
 <script lang="ts">
+    import { untrack } from "svelte";
     import { EditorView, basicSetup } from "codemirror";
+    import { Compartment } from "@codemirror/state";
     import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
     import { tags } from "@lezer/highlight";
+    import { oneDark } from "@codemirror/theme-one-dark";
     import type { Program } from "./types";
     import { ALL_REGS, isReg } from "./types";
     import { sim, ui } from "./state.svelte";
@@ -47,31 +50,32 @@
         { tag: tags.meta,                        color: "var(--text-faint)" },
     ]);
 
-    const editorTheme = EditorView.theme({
+    const structuralTheme = EditorView.theme({
         "&": { fontSize: "13px" },
         "&.cm-focused": { outline: "none" },
-        ".cm-content": {
-            fontFamily: "var(--mono)",
-            padding: "6px 4px",
-            caretColor: "var(--text)",
-            minHeight: "220px",
-            background: "var(--surface2)",
-        },
+        ".cm-content": { fontFamily: "var(--mono)", caretColor: "var(--text)" },
+        ".cm-gutters": { fontFamily: "var(--mono)" },
         ".cm-scroller": { lineHeight: "1.5" },
-        ".cm-gutters": {
-            background: "var(--surface2)",
-            border: "none",
-            borderRight: "1px solid var(--border)",
-            color: "var(--text-faint)",
-            fontFamily: "var(--mono)",
-        },
         ".cm-activeLine": { background: "rgba(128,128,128,0.05)" },
         ".cm-activeLineGutter": { background: "rgba(128,128,128,0.05)" },
-        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-            background: "var(--blue-dim)",
-        },
-        ".cm-cursor": { borderLeftColor: "var(--text)" },
     });
+
+    const themeCompartment = new Compartment();
+    const darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
+
+    function isDark(): boolean {
+        if (ui.theme === "dark") return true;
+        if (ui.theme === "light") return false;
+        return darkMQ.matches;
+    }
+
+    let viewRef: EditorView | null = null;
+
+    function syncTheme() {
+        viewRef?.dispatch({
+            effects: themeCompartment.reconfigure(isDark() ? oneDark : []),
+        });
+    }
 
     // ── Component state ───────────────────────────────────────────────────────
 
@@ -106,20 +110,32 @@
 
     $effect(() => {
         if (!editorContainer) return;
-        const view = new EditorView({
-            doc: assembly,
+        const v = new EditorView({
+            doc: untrack(() => assembly),
             extensions: [
                 basicSetup,
                 riscvLang,
                 syntaxHighlighting(riscvHighlight),
-                editorTheme,
+                structuralTheme,
+                themeCompartment.of(isDark() ? oneDark : []),
                 EditorView.updateListener.of((update) => {
                     if (update.docChanged) assembly = update.state.doc.toString();
                 }),
             ],
             parent: editorContainer,
         });
-        return () => view.destroy();
+        viewRef = v;
+        darkMQ.addEventListener("change", syncTheme);
+        return () => {
+            darkMQ.removeEventListener("change", syncTheme);
+            viewRef = null;
+            v.destroy();
+        };
+    });
+
+    $effect(() => {
+        ui.theme; // track theme changes from settings
+        syncTheme();
     });
 
     // ── Actions ───────────────────────────────────────────────────────────────
