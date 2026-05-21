@@ -2,6 +2,7 @@
     import { sim, ui, fmtRegVal } from "./state.svelte";
     import { hx } from "./assembler";
     import HexValue from "./HexValue.svelte";
+    import { _ } from "svelte-i18n";
 
     const hiR = $derived(new Set(sim.currentStep?.hiReg ?? []));
     const nextAddr = $derived(sim.currentStep?.nextAddr ?? null);
@@ -13,14 +14,14 @@
 </script>
 
 <div class="reg-panel">
-    <div class="panel-title">Registros</div>
+    <div class="panel-title">{$_('register_panel.title')}</div>
     <div class="reg-list scrollable">
         <!-- PC row -->
         <div class="reg-row pc-row">
             <span class="reg-name">pc</span>
             <span class="reg-val">{nextAddr !== null ? hx(nextAddr) : "?"}</span
             >
-            <span class="reg-desc">program counter</span>
+            <span class="reg-desc">{$_('reg.pc')}</span>
         </div>
 
         <!-- Register rows — keyed by cur so reg-flash re-triggers each step -->
@@ -45,7 +46,7 @@
                     {:else}
                         <span class="reg-val">{fmtRegVal(r.key, null)}</span>
                     {/if}
-                    <span class="reg-desc">{r.desc}</span>
+                    <span class="reg-desc">{$_('reg.' + r.key)}</span>
                 </div>
             {/each}
         {/key}

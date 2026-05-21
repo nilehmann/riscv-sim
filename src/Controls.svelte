@@ -2,6 +2,7 @@
     import type { Program } from "./types";
     import { PROGRAMS } from "./programs";
     import { sim, ui } from "./state.svelte";
+    import { _ } from "svelte-i18n";
 
     let selectedProgram = $state<Program>(PROGRAMS[0]!);
     let barEl = $state<HTMLElement | null>(null);
@@ -104,7 +105,7 @@
     </div>
 
     <!-- Edit button -->
-    <button class="btn edit-btn" onclick={() => (ui.showEditor = true)}>Edit</button>
+    <button class="btn edit-btn" onclick={() => (ui.showEditor = true)}>{$_('controls.edit')}</button>
 
     <!-- Step counter -->
     <span class="step-counter">{sim.posIdx + 1} / {sim.total}</span>
@@ -138,12 +139,12 @@
 
     <!-- Navigation buttons -->
     <button class="btn" disabled={sim.posIdx === 0} onclick={() => sim.go(-1)}
-        >← Anterior</button
+        >{$_('controls.prev')}</button
     >
     <button
         class="btn"
         disabled={sim.posIdx === sim.total - 1}
-        onclick={() => sim.go(1)}>Siguiente →</button
+        onclick={() => sim.go(1)}>{$_('controls.next')}</button
     >
 </div>
 

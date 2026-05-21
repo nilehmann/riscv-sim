@@ -6,6 +6,7 @@
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
   },
   "include": ["src", "vite.config.ts"],
 }

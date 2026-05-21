@@ -1,10 +1,16 @@
 <script lang="ts">
     import { ui } from "./state.svelte";
+    import { locale, _ } from "svelte-i18n";
 
     const themes = [
-        { value: "light", label: "Light" },
-        { value: "dark",  label: "Dark"  },
-        { value: "system", label: "System" },
+        { value: "light",  key: "settings.theme_light"  },
+        { value: "dark",   key: "settings.theme_dark"   },
+        { value: "system", key: "settings.theme_system" },
+    ] as const;
+
+    const languages = [
+        { value: "en", label: "English" },
+        { value: "es", label: "Español" },
     ] as const;
 </script>
 
@@ -13,32 +19,45 @@
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="panel" onclick={(e) => e.stopPropagation()}>
         <div class="panel-header">
-            <span class="panel-title">Settings</span>
+            <span class="panel-title">{$_('settings.title')}</span>
             <button class="close-btn" onclick={() => (ui.showSettings = false)}>×</button>
         </div>
 
         <div class="section">
-            <div class="section-label">Theme</div>
+            <div class="section-label">{$_('settings.theme_label')}</div>
             <div class="theme-options">
                 {#each themes as t}
                     <button
                         class="theme-btn"
                         class:active={ui.theme === t.value}
                         onclick={() => (ui.theme = t.value)}
-                    >{t.label}</button>
+                    >{$_(t.key)}</button>
                 {/each}
             </div>
         </div>
 
         <div class="section section-border">
-            <div class="section-label">Editor</div>
+            <div class="section-label">{$_('settings.editor_label')}</div>
             <div class="toggle-row">
-                <span class="toggle-label">Vim keybindings</span>
+                <span class="toggle-label">{$_('settings.vim_label')}</span>
                 <button
                     class="toggle-btn"
                     class:active={ui.vimMode}
                     onclick={() => (ui.vimMode = !ui.vimMode)}
-                >{ui.vimMode ? "On" : "Off"}</button>
+                >{ui.vimMode ? $_('settings.on') : $_('settings.off')}</button>
+            </div>
+        </div>
+
+        <div class="section section-border">
+            <div class="section-label">{$_('settings.language_label')}</div>
+            <div class="theme-options">
+                {#each languages as lang}
+                    <button
+                        class="theme-btn"
+                        class:active={$locale === lang.value}
+                        onclick={() => ($locale = lang.value)}
+                    >{lang.label}</button>
+                {/each}
             </div>
         </div>
     </div>

@@ -7,11 +7,22 @@
     import Settings from "./Settings.svelte";
     import ProgramEditor from "./ProgramEditor.svelte";
     import { sim, ui } from "./state.svelte";
+    import { setupI18n, persistLocale } from "./i18n";
+    import { locale, _ } from "svelte-i18n";
+
+    setupI18n();
 
     const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
 
     $effect(() => {
         localStorage.setItem('vimMode', String(ui.vimMode));
+    });
+
+    $effect(() => {
+        const l = $locale;
+        if (!l) return;
+        persistLocale(l);
+        document.documentElement.lang = l;
     });
 
     $effect(() => {
@@ -96,7 +107,7 @@
 <!-- App layout -->
 <header class="app-header">
     <span class="app-title">RISC-V Simulator</span>
-    <button class="settings-btn" onclick={() => (ui.showSettings = true)} data-tooltip="Settings">⚙</button>
+    <button class="settings-btn" onclick={() => (ui.showSettings = true)} data-tooltip={$_('settings.tooltip')}>⚙</button>
 </header>
 
 {#if ui.showSettings}

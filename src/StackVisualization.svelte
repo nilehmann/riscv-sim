@@ -3,6 +3,7 @@
     import { sim, ui } from "./state.svelte";
     import { garbageWord } from "./memUtils";
     import StackSlot from "./StackSlot.svelte";
+    import { _ } from "svelte-i18n";
 
     // ─── Constants ────────────────────────────────────────────────────────
     const FRAME_COLORS = [
@@ -226,7 +227,7 @@
     {#if sim.loadError}
         {@const e = sim.loadError}
         <div class="config-error">
-            <div class="config-error-title">Error</div>
+            <div class="config-error-title">{$_('stack.error_title')}</div>
             {#if e.message}
                 <p>{e.message}</p>
             {/if}
@@ -236,7 +237,7 @@
         </div>
     {:else if sim.inferError && sim.cur >= sim.inferError.step}
         <div class="config-error">
-            <div class="config-error-title">Non-stack behavior detected</div>
+            <div class="config-error-title">{$_('stack.non_stack_title')}</div>
             <p>{sim.inferError.message}</p>
         </div>
     {:else if step}
@@ -268,7 +269,7 @@
                 <!-- Caller ghost (above) -->
                 <div class="frame caller" id="fr-caller">
                     <div class="frame-ellipsis">
-                        <div>dirección alta</div>
+                        <div>{$_('stack.high_address')}</div>
                         <div>↑</div>
                     </div>
                     {#each callerGhostRows as row}
@@ -362,7 +363,7 @@
                     {/each}
                     <div class="frame-ellipsis">
                         <div>↓</div>
-                        <div>dirección baja</div>
+                        <div>{$_('stack.low_address')}</div>
                     </div>
                 </div>
             </div>

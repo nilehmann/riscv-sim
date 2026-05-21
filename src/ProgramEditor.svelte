@@ -10,6 +10,8 @@
     import { ALL_REGS, isReg } from "./types";
     import { checkElementFit } from "./validation";
     import { sim, ui } from "./state.svelte";
+    import { get } from "svelte/store";
+    import { _ } from "svelte-i18n";
 
     // ── RISC-V language mode ──────────────────────────────────────────────────
 
@@ -216,19 +218,19 @@
     function load() {
         loadError = null;
         if (regInvalidIdxs.size > 0) {
-            loadError = "Fix invalid register names before loading";
+            loadError = get(_)("editor.err_fix_regs");
             return;
         }
         const parsedBase = parseInt(baseAddress);
         if (isNaN(parsedBase)) {
-            loadError = "Invalid base address";
+            loadError = get(_)("editor.err_base_address");
             return;
         }
         const initialRegs: Record<string, number> = {};
         for (const { reg, val } of regs) {
             const v = parseInt(val);
             if (isNaN(v)) {
-                loadError = `Invalid value for ${reg}`;
+                loadError = get(_)("editor.err_reg_value", { values: { reg } });
                 return;
             }
             initialRegs[reg] = v;
@@ -236,20 +238,20 @@
         let parsedStackBase: number | undefined;
         if (showStack) {
             parsedStackBase = parseInt(stackBase);
-            if (isNaN(parsedStackBase)) { loadError = "Invalid stack base address"; return; }
+            if (isNaN(parsedStackBase)) { loadError = get(_)("editor.err_stack_base"); return; }
             const parsedStackSp = parseInt(stackSp);
-            if (isNaN(parsedStackSp)) { loadError = "Invalid stack pointer value"; return; }
+            if (isNaN(parsedStackSp)) { loadError = get(_)("editor.err_stack_pointer"); return; }
             initialRegs["sp"] = parsedStackSp;
         }
         const memoryRegions: MemoryRegion[] = [];
         for (let ri = 0; ri < regions.length; ri++) {
             const r = regions[ri]!;
             const addr = parseInt(r.addr);
-            if (isNaN(addr)) { loadError = `Region ${ri + 1}: invalid address`; return; }
+            if (isNaN(addr)) { loadError = get(_)("editor.err_region_address", { values: { n: ri + 1 } }); return; }
             const elements: number[] = [];
             for (let ei = 0; ei < r.elements.length; ei++) {
                 const v = parseInt(r.elements[ei]!);
-                if (isNaN(v)) { loadError = `Region ${ri + 1}, element ${ei}: invalid value`; return; }
+                if (isNaN(v)) { loadError = get(_)("editor.err_region_element", { values: { n: ri + 1, ei } }); return; }
                 const err = checkElementFit(v, r.elementSize, `Region ${ri + 1}, element ${ei}`);
                 if (err) { loadError = err.message; return; }
                 elements.push(v);
@@ -271,7 +273,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div class="panel" onclick={(e) => e.stopPropagation()}>
         <div class="panel-header">
-            <span class="panel-title">Edit Program</span>
+            <span class="panel-title">{$_('editor.title')}</span>
             <button class="close-btn" onclick={() => (ui.showEditor = false)}>×</button>
         </div>
 
@@ -279,28 +281,28 @@
             <!-- Name + entry point + base address row -->
             <div class="row2">
                 <div class="field">
-                    <label class="field-label">Name</label>
-                    <input class="input" bind:value={name} placeholder="Program name" />
+                    <label class="field-label">{$_('editor.name')}</label>
+                    <input class="input" bind:value={name} placeholder={$_('editor.placeholder_name')} />
                 </div>
                 <div class="field">
-                    <label class="field-label">Entry point</label>
-                    <input class="input mono" bind:value={entryPoint} placeholder="optional — first instruction" />
+                    <label class="field-label">{$_('editor.entry_point')}</label>
+                    <input class="input mono" bind:value={entryPoint} placeholder={$_('editor.placeholder_entry')} />
                 </div>
                 <div class="field field-narrow">
-                    <label class="field-label">Base address</label>
-                    <input class="input mono" bind:value={baseAddress} placeholder="0x8000" />
+                    <label class="field-label">{$_('editor.base_address')}</label>
+                    <input class="input mono" bind:value={baseAddress} placeholder={$_('editor.placeholder_base')} />
                 </div>
             </div>
 
             <!-- Assembly editor -->
             <div class="field">
-                <label class="field-label">Assembly</label>
+                <label class="field-label">{$_('editor.assembly')}</label>
                 <div class="asm-editor-wrap" bind:this={editorContainer} onmousedown={handleWrapperMousedown}></div>
             </div>
 
             <!-- Initial registers -->
             <div class="field">
-                <label class="field-label">Initial registers</label>
+                <label class="field-label">{$_('editor.initial_registers')}</label>
                 <datalist id="regs-list-dl">
                     {#each ALL_REGS.filter(r => r !== "zero" && !(showStack && r === "sp")) as r}<option value={r}></option>{/each}
                 </datalist>
@@ -312,33 +314,33 @@
                                 class="input mono reg-name"
                                 class:invalid={regInvalidIdxs.has(i)}
                                 bind:value={row.reg}
-                                placeholder="a0, sp, t0…"
+                                placeholder={$_('editor.placeholder_reg')}
                             />
-                            <input class="input mono reg-val" bind:value={row.val} placeholder="0x0" />
+                            <input class="input mono reg-val" bind:value={row.val} placeholder={$_('editor.placeholder_val')} />
                             <button class="remove-btn" onclick={() => removeReg(i)}>×</button>
                         </div>
                     {/each}
-                    <button class="add-reg-btn" onclick={addReg}>+ Add register</button>
+                    <button class="add-reg-btn" onclick={addReg}>{$_('editor.add_register')}</button>
                 </div>
             </div>
 
             <div class="toggle-row">
-                <span class="toggle-label">Show stack</span>
+                <span class="toggle-label">{$_('editor.show_stack')}</span>
                 <button
                     class="toggle-btn"
                     class:active={showStack}
                     onclick={() => (showStack = !showStack)}
-                >{showStack ? "On" : "Off"}</button>
+                >{showStack ? $_('settings.on') : $_('settings.off')}</button>
             </div>
 
             {#if showStack}
                 <div class="row2">
                     <div class="field">
-                        <label class="field-label">Stack base</label>
+                        <label class="field-label">{$_('editor.stack_base')}</label>
                         <input class="input mono" bind:value={stackBase} placeholder="0xc0000000" />
                     </div>
                     <div class="field">
-                        <label class="field-label">Stack pointer (sp)</label>
+                        <label class="field-label">{$_('editor.stack_pointer')}</label>
                         <input class="input mono" bind:value={stackSp} placeholder="0xbfffff00" />
                     </div>
                 </div>
@@ -346,7 +348,7 @@
 
             <!-- Memory regions -->
             <div class="field">
-                <label class="field-label">Memory regions</label>
+                <label class="field-label">{$_('editor.memory_regions')}</label>
                 <div class="regions-list">
                     {#each regions as region, ri}
                         <div class="region-card">
@@ -364,18 +366,18 @@
                                 <button class="remove-btn" onclick={() => removeRegion(ri)}>×</button>
                             </div>
                             <div class="elements-scroll" bind:this={scrollEls[ri]}>
-                                {#each region.elements as _, ei}
+                                {#each region.elements as _elem, ei}
                                     <div class="elem-row">
                                         <span class="elem-idx mono">[{ei}]</span>
-                                        <input class="input mono elem-val" bind:value={region.elements[ei]} placeholder="0x0" />
+                                        <input class="input mono elem-val" bind:value={region.elements[ei]} placeholder={$_('editor.placeholder_val')} />
                                         <button class="remove-btn" onclick={() => removeElement(ri, ei)}>×</button>
                                     </div>
                                 {/each}
                             </div>
-                            <button class="add-reg-btn" onclick={() => addElement(ri)}>+ Add element</button>
+                            <button class="add-reg-btn" onclick={() => addElement(ri)}>{$_('editor.add_element')}</button>
                         </div>
                     {/each}
-                    <button class="add-reg-btn" onclick={addRegion}>+ Add region</button>
+                    <button class="add-reg-btn" onclick={addRegion}>{$_('editor.add_region')}</button>
                 </div>
             </div>
 
@@ -385,8 +387,8 @@
         </div>
 
         <div class="panel-footer">
-            <button class="btn btn-cancel" onclick={() => (ui.showEditor = false)}>Cancel</button>
-            <button class="btn btn-load" onclick={load}>Load</button>
+            <button class="btn btn-cancel" onclick={() => (ui.showEditor = false)}>{$_('editor.cancel')}</button>
+            <button class="btn btn-load" onclick={load}>{$_('editor.load')}</button>
         </div>
     </div>
 </div>

@@ -3,6 +3,7 @@
     import { sim, ui } from "./state.svelte";
     import { hx, fmtConcreteRel } from "./assembler";
     import InstrView from "./InstrView.svelte";
+    import { _ } from "svelte-i18n";
 
     // ─── HTML escape (used by highlightC and infoIconHtml) ───────────────
 
@@ -221,13 +222,13 @@
             class="code-tab"
             class:active={ui.activeTab === "asm"}
             onclick={() => (ui.activeTab = "asm")}
-        >Assembly</button>
+        >{$_('code_panel.tab_assembly')}</button>
         <button
             class="code-tab"
             class:active={ui.activeTab === "c"}
             disabled={!sim.program?.cCode}
             onclick={() => (ui.activeTab = "c")}
-        >C</button>
+        >{$_('code_panel.tab_c')}</button>
     </div>
 
     <!-- Assembly pane -->
@@ -239,12 +240,12 @@
                     class="asm-mode-btn"
                     class:active={sim.asmMode === "source"}
                     onclick={() => sim.switchAsmMode("source")}
-                >Fuente</button>
+                >{$_('code_panel.mode_source')}</button>
                 <button
                     class="asm-mode-btn"
                     class:active={sim.asmMode === "assembled"}
                     onclick={() => sim.switchAsmMode("assembled")}
-                >Ensamblado</button>
+                >{$_('code_panel.mode_assembled')}</button>
             </div>
 
             <!-- Assembly lines -->

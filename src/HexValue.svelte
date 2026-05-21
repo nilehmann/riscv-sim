@@ -1,5 +1,6 @@
 <script lang="ts">
   import { hx } from "./assembler";
+  import { _ } from "svelte-i18n";
 
   let { value, elementSize = 4, faint = false }: { value: number; elementSize?: 1 | 2 | 4; faint?: boolean } =
     $props();
@@ -49,11 +50,11 @@
     style="left:{x}px;top:{y}px"
   >
     <div class="tt-row">
-      <span class="tt-label">unsigned</span>
+      <span class="tt-label">{$_('hex_value.unsigned')}</span>
       <span class="tt-num">{unsigned}</span>
     </div>
     <div class="tt-row">
-      <span class="tt-label">signed</span>
+      <span class="tt-label">{$_('hex_value.signed')}</span>
       <span class="tt-num">{signed}</span>
     </div>
   </div>
