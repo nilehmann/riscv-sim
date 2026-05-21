@@ -11,6 +11,10 @@
     const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
 
     $effect(() => {
+        localStorage.setItem('vimMode', String(ui.vimMode));
+    });
+
+    $effect(() => {
         localStorage.setItem('theme', ui.theme);
         const apply = () => {
             const effective =

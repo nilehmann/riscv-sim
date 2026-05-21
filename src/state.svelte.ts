@@ -48,6 +48,7 @@ export class UIState {
   );
   showSettings = $state(false);
   showEditor = $state(false);
+  vimMode = $state<boolean>(localStorage.getItem("vimMode") === "true");
 }
 
 export const ui = new UIState();

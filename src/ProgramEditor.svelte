@@ -5,6 +5,7 @@
     import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
     import { tags } from "@lezer/highlight";
     import { oneDark } from "@codemirror/theme-one-dark";
+    import { vim } from "@replit/codemirror-vim";
     import type { Program } from "./types";
     import { ALL_REGS, isReg } from "./types";
     import { sim, ui } from "./state.svelte";
@@ -61,6 +62,7 @@
     });
 
     const themeCompartment = new Compartment();
+    const vimCompartment = new Compartment();
     const darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
 
     function isDark(): boolean {
@@ -118,6 +120,7 @@
                 syntaxHighlighting(riscvHighlight),
                 structuralTheme,
                 themeCompartment.of(isDark() ? oneDark : []),
+                vimCompartment.of(untrack(() => ui.vimMode) ? vim() : []),
                 EditorView.updateListener.of((update) => {
                     if (update.docChanged) assembly = update.state.doc.toString();
                 }),
@@ -138,6 +141,13 @@
         syncTheme();
     });
 
+    $effect(() => {
+        ui.vimMode; // track vim mode changes from settings
+        viewRef?.dispatch({
+            effects: vimCompartment.reconfigure(ui.vimMode ? vim() : []),
+        });
+    });
+
     // ── Actions ───────────────────────────────────────────────────────────────
 
     function addReg() {
@@ -148,6 +158,18 @@
 
     function removeReg(i: number) {
         regs = regs.filter((_, idx) => idx !== i);
+    }
+
+    function handleWrapperMousedown(e: MouseEvent) {
+        if (!viewRef) return;
+        if (!viewRef.contentDOM.contains(e.target as Node)) {
+            e.preventDefault();
+            viewRef.focus();
+            viewRef.dispatch({
+                selection: { anchor: viewRef.state.doc.length },
+                scrollIntoView: true,
+            });
+        }
     }
 
     function load() {
@@ -209,7 +231,7 @@
             <!-- Assembly editor -->
             <div class="field">
                 <label class="field-label">Assembly</label>
-                <div class="asm-editor-wrap" bind:this={editorContainer}></div>
+                <div class="asm-editor-wrap" bind:this={editorContainer} onmousedown={handleWrapperMousedown}></div>
             </div>
 
             <!-- Initial registers -->

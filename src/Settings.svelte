@@ -29,6 +29,18 @@
                 {/each}
             </div>
         </div>
+
+        <div class="section section-border">
+            <div class="section-label">Editor</div>
+            <div class="toggle-row">
+                <span class="toggle-label">Vim keybindings</span>
+                <button
+                    class="toggle-btn"
+                    class:active={ui.vimMode}
+                    onclick={() => (ui.vimMode = !ui.vimMode)}
+                >{ui.vimMode ? "On" : "Off"}</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -106,6 +118,40 @@
         border-color: var(--text-faint);
     }
     .theme-btn.active {
+        background: var(--blue-dim);
+        border-color: var(--blue);
+        color: var(--blue);
+        font-weight: 600;
+    }
+    .section-border {
+        border-top: 1px solid var(--border);
+    }
+    .toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .toggle-label {
+        font-family: var(--sans);
+        font-size: 13px;
+        color: var(--text);
+    }
+    .toggle-btn {
+        padding: 4px 14px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--surface2);
+        color: var(--text-dim);
+        font-family: var(--sans);
+        font-size: 13px;
+        cursor: pointer;
+        min-width: 48px;
+    }
+    .toggle-btn:hover {
+        border-color: var(--text-faint);
+        color: var(--text);
+    }
+    .toggle-btn.active {
         background: var(--blue-dim);
         border-color: var(--blue);
         color: var(--blue);
