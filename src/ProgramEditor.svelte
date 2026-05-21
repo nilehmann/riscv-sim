@@ -8,6 +8,7 @@
     import { vim } from "@replit/codemirror-vim";
     import type { Program, MemoryRegion } from "./types";
     import { ALL_REGS, isReg } from "./types";
+    import { checkElementFit } from "./validation";
     import { sim, ui } from "./state.svelte";
 
     // ── RISC-V language mode ──────────────────────────────────────────────────
@@ -245,15 +246,12 @@
             const r = regions[ri]!;
             const addr = parseInt(r.addr);
             if (isNaN(addr)) { loadError = `Region ${ri + 1}: invalid address`; return; }
-            const maxVal = r.elementSize === 4 ? 0xffffffff : (1 << (r.elementSize * 8)) - 1;
             const elements: number[] = [];
             for (let ei = 0; ei < r.elements.length; ei++) {
                 const v = parseInt(r.elements[ei]!);
                 if (isNaN(v)) { loadError = `Region ${ri + 1}, element ${ei}: invalid value`; return; }
-                if ((v >>> 0) > maxVal) {
-                    loadError = `Region ${ri + 1}, element ${ei}: ${v} does not fit in ${r.elementSize} byte(s)`;
-                    return;
-                }
+                const err = checkElementFit(v, r.elementSize, `Region ${ri + 1}, element ${ei}`);
+                if (err) { loadError = err.message; return; }
                 elements.push(v);
             }
             memoryRegions.push({ addr, elementSize: r.elementSize, elements });

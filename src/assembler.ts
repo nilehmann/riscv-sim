@@ -5,18 +5,13 @@ import type {
   AssemblyResult,
   SourceInstr,
 } from "./types";
-import { AppError, imm } from "./types";
+import { AppError, hx, imm } from "./types";
 import type { Imm } from "./types";
 import { parseProgram } from "./parser";
 import type { ParsedLine } from "./parser";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
-export const hx = (v: number, bytes: 1 | 2 | 4 = 4): string =>
-  "0x" +
-  (v >>> 0)
-    .toString(16)
-    .toUpperCase()
-    .padStart(bytes * 2, "0");
+export { hx };
 
 // ─── Pseudo-instruction expander ─────────────────────────────────────────
 function assembleInstr(
@@ -184,23 +179,6 @@ function worstCaseSize(parsed: ParsedInstr): number {
 
 
 export function assembleProgram(prog: Program): AssemblyResult | AppError {
-  // ── Range validation: all numeric config values must fit in 32 bits ───────
-  const u32 = (v: number) => v >>> 0 === v;
-  if (!u32(prog.baseAddress))
-    return new AppError(
-      `baseAddress ${hx(prog.baseAddress)} does not fit in 32 bits`,
-    );
-  if (prog.stackBase != null && !u32(prog.stackBase))
-    return new AppError(
-      `stackBase ${hx(prog.stackBase!)} does not fit in 32 bits`,
-    );
-  for (const [reg, val] of Object.entries(prog.initialRegs)) {
-    if (!u32(val))
-      return new AppError(
-        `Initial register ${reg} = 0x${val.toString(16).toUpperCase()} does not fit in 32 bits`,
-      );
-  }
-
   // ── Pass 1: parse all instructions and assign label addresses ──────────
   // Use worst-case sizes so label addresses are upper bounds.
   const parsedLines = parseProgram(prog);
@@ -234,24 +212,6 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
       addr += 4;
     }
     sourceInstrs.push({ label, raw, parsed, concretes, firstAddr });
-  }
-
-  // Overlap check: code section must not reach into the stack region.
-  const stackBase = prog.stackBase ?? 0xc0000000;
-  const codeEnd = prog.baseAddress + addr;
-  if (codeEnd > stackBase)
-    return new AppError(
-      `Code section ends at ${hx(codeEnd)}, overlapping stack base ${hx(stackBase)}`,
-      "Reduce baseAddress or increase stackBase",
-    );
-
-  // sp consistency check: initial sp must be ≤ stackBase, otherwise [sp, stackBase) is empty.
-  if (prog.osMode !== false) {
-    const initSp = prog.initialRegs.sp ?? 0;
-    if (initSp > stackBase)
-      return new AppError(
-        `Initial sp (${hx(initSp)}) is greater than stackBase (${hx(stackBase)}); the valid stack range [sp, stackBase) would be empty`,
-      );
   }
 
   // Build real section-relative label addresses from actual pass-2 positions.

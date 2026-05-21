@@ -1,3 +1,10 @@
+export const hx = (v: number, bytes: 1 | 2 | 4 = 4): string =>
+  "0x" +
+  (v >>> 0)
+    .toString(16)
+    .toUpperCase()
+    .padStart(bytes * 2, "0");
+
 export const ALL_REGS = [
   "zero",
   "ra",
