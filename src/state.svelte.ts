@@ -47,6 +47,7 @@ export class UIState {
     (localStorage.getItem('theme') as 'light' | 'dark' | 'system') ?? 'system'
   );
   showSettings = $state(false);
+  showEditor = $state(false);
 }
 
 export const ui = new UIState();

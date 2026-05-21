@@ -2,6 +2,13 @@ import type { Program } from "./types";
 
 export const PROGRAMS: Program[] = [
   {
+    name: "New program",
+    entryPoint: "main",
+    initialRegs: { sp: 0xbfffff00, ra: 0x8050 },
+    baseAddress: 0x8000,
+    assembly: `main:\n    ret\n`,
+  },
+  {
     name: "baz -> foo",
     cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
     entryPoint: "baz",

@@ -5,6 +5,7 @@
     import RegisterPanel from "./RegisterPanel.svelte";
     import Controls from "./Controls.svelte";
     import Settings from "./Settings.svelte";
+    import ProgramEditor from "./ProgramEditor.svelte";
     import { sim, ui } from "./state.svelte";
 
     const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
@@ -96,6 +97,10 @@
 
 {#if ui.showSettings}
     <Settings />
+{/if}
+
+{#if ui.showEditor}
+    <ProgramEditor />
 {/if}
 
 <div class="main">

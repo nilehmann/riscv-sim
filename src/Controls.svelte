@@ -103,6 +103,9 @@
         </ul>
     </div>
 
+    <!-- Edit button -->
+    <button class="btn edit-btn" onclick={() => (ui.showEditor = true)}>Edit</button>
+
     <!-- Step counter -->
     <span class="step-counter">{sim.posIdx + 1} / {sim.total}</span>
 
