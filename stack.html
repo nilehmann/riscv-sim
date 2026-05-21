@@ -1948,8 +1948,9 @@
                 const { sourceInstrs } = assembleProgram(prog);
                 const progStart = prog.baseAddress;
                 const lastSi = sourceInstrs[sourceInstrs.length - 1];
-                const progEnd =
-                    lastSi.concretes[lastSi.concretes.length - 1].addr + 4;
+                const progEnd = lastSi
+                    ? lastSi.concretes[lastSi.concretes.length - 1].addr + 4
+                    : progStart;
                 const initRa = prog.initialRegs.ra ?? 0;
                 if (initRa >= progStart && initRa < progEnd) {
                     buildAsmView(prog);

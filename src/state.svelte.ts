@@ -156,8 +156,8 @@ export class SimulationState {
 
     const { sourceInstrs } = assembled;
     const progStart = prog.baseAddress;
-    const lastSi = sourceInstrs[sourceInstrs.length - 1]!;
-    const progEnd = lastSi.firstAddr + lastSi.concretes.length * 4;
+    const lastSi = sourceInstrs[sourceInstrs.length - 1];
+    const progEnd = lastSi ? lastSi.firstAddr + lastSi.concretes.length * 4 : progStart;
     const initRa = prog.initialRegs.ra ?? 0;
     if (initRa >= progStart && initRa < progEnd) {
       this.loadError = new AppError(
@@ -172,7 +172,7 @@ export class SimulationState {
     const regions = prog.memoryRegions ?? [];
 
     function overlaps(aS: number, aE: number, bS: number, bE: number) {
-      return aS < bE && bS < aE;
+      return aS < aE && bS < bE && aS < bE && bS < aE;
     }
 
     for (let ri = 0; ri < regions.length; ri++) {

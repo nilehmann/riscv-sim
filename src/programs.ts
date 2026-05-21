@@ -3,10 +3,9 @@ import type { Program } from "./types";
 export const PROGRAMS: Program[] = [
   {
     name: "New program",
-    entryPoint: "main",
-    initialRegs: { sp: 0xbfffff00, ra: 0x8050 },
+    initialRegs: {},
     baseAddress: 0x8000,
-    assembly: `main:\n    ret\n`,
+    assembly: "",
   },
   {
     name: "baz -> foo",
