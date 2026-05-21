@@ -4,10 +4,11 @@ import type {
   Instr,
   AssemblyResult,
   SourceInstr,
-  Reg,
 } from "./types";
-import { AppError, isReg, imm } from "./types";
+import { AppError, imm } from "./types";
 import type { Imm } from "./types";
+import { parseProgram } from "./parser";
+import type { ParsedLine } from "./parser";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 export const hx = (v: number, bytes: 1 | 2 | 4 = 4): string =>
@@ -16,164 +17,6 @@ export const hx = (v: number, bytes: 1 | 2 | 4 = 4): string =>
     .toString(16)
     .toUpperCase()
     .padStart(bytes * 2, "0");
-
-// Normalises a register name (accepting the fp alias) and validates it.
-// Returns the canonical Reg, or AppError if the name is not a valid register.
-function parseReg(s: string | undefined, raw: string): Reg | AppError {
-  if (!s) return new AppError(`Unknown instruction: '${raw}'`);
-  const name = s === "fp" ? "s0" : s;
-  if (isReg(name)) return name;
-  return new AppError(
-    `'${s}' is not a valid register name`,
-    "Valid registers: x0\u2013x31 and their aliases (zero, ra, sp, a0\u2013a7, s0\u2013s11, t0\u2013t6, gp, tp)",
-  );
-}
-
-// ─── Instruction parser ───────────────────────────────────────────────────
-export function parseInstr(raw: string): ParsedInstr | AppError {
-  const s = raw.trim().replace(/\s+/g, " ");
-  const sp = s.indexOf(" ");
-  const op = sp === -1 ? s : s.slice(0, sp);
-  const argStr = sp === -1 ? "" : s.slice(sp + 1);
-  const args = argStr ? argStr.split(",").map((a) => a.trim()) : [];
-
-  if (op === "ret") return { op: "ret" };
-  if (op === "nop") return { op: "nop" };
-  if (op === "jalr") {
-    const mem = args[1] && args[1].match(/^(-?\d+)\((\w+)\)$/);
-    if (!mem) return new AppError(`Unknown instruction: '${raw}'`);
-    const rd = parseReg(args[0], raw);
-    const rs1 = parseReg(mem[2], raw);
-    if (rd instanceof AppError) return rd;
-    if (rs1 instanceof AppError) return rs1;
-    return { op: "jalr", rd, rs1, imm: Number(mem[1]) };
-  }
-  if (op === "call") return { op: "call", target: args[0]! };
-  if (op === "j") return { op: "j", target: args[0]! };
-  if (op === "jal") {
-    const rd = parseReg(args.length > 1 ? args[0] : "ra", raw);
-    if (rd instanceof AppError) return rd;
-    return { op: "jal", rd, target: args[args.length - 1]! };
-  }
-  if (op === "li" || op === "lui") {
-    const rd = parseReg(args[0], raw);
-    if (rd instanceof AppError) return rd;
-    return { op, rd, imm: Number(args[1]) };
-  }
-  if (op === "jr") {
-    const rs = parseReg(args[0], raw);
-    if (rs instanceof AppError) return rs;
-    return { op: "jr", rs };
-  }
-  if (op === "mv" || op === "neg") {
-    const rd = parseReg(args[0], raw);
-    const rs1 = parseReg(args[1], raw);
-    if (rd instanceof AppError) return rd;
-    if (rs1 instanceof AppError) return rs1;
-    return { op, rd, rs1 };
-  }
-  if (
-    op === "addi" ||
-    op === "slli" ||
-    op === "srli" ||
-    op === "srai" ||
-    op === "andi" ||
-    op === "ori" ||
-    op === "xori"
-  ) {
-    const rd = parseReg(args[0], raw);
-    const rs1 = parseReg(args[1], raw);
-    if (rd instanceof AppError) return rd;
-    if (rs1 instanceof AppError) return rs1;
-    return { op, rd, rs1, imm: Number(args[2]) };
-  }
-  if (
-    (
-      [
-        "add",
-        "sub",
-        "mul",
-        "div",
-        "rem",
-        "and",
-        "or",
-        "xor",
-        "sll",
-        "srl",
-        "sra",
-      ] as string[]
-    ).includes(op)
-  ) {
-    const rd = parseReg(args[0], raw);
-    const rs1 = parseReg(args[1], raw);
-    const rs2 = parseReg(args[2], raw);
-    if (rd instanceof AppError) return rd;
-    if (rs1 instanceof AppError) return rs1;
-    if (rs2 instanceof AppError) return rs2;
-    return {
-      op: op as
-        | "add"
-        | "sub"
-        | "mul"
-        | "div"
-        | "rem"
-        | "and"
-        | "or"
-        | "xor"
-        | "sll"
-        | "srl"
-        | "sra",
-      rd,
-      rs1,
-      rs2,
-    };
-  }
-  // sw/sh/sb/lw/lh/lb/lhu/lbu: reg, offset(base)
-  if (
-    (["sw", "lw", "sb", "lb", "sh", "lh", "lbu", "lhu"] as string[]).includes(
-      op,
-    )
-  ) {
-    const mem = args[1] && args[1].match(/^(-?\d+)\((\w+)\)$/);
-    if (mem) {
-      const rs1 = parseReg(mem[2], raw);
-      if (rs1 instanceof AppError) return rs1;
-      if (op === "sw" || op === "sb" || op === "sh") {
-        const rs2 = parseReg(args[0], raw);
-        if (rs2 instanceof AppError) return rs2;
-        return {
-          op: op as "sw" | "sh" | "sb",
-          rs2,
-          offset: Number(mem[1]),
-          rs1,
-        };
-      }
-      const rd = parseReg(args[0], raw);
-      if (rd instanceof AppError) return rd;
-      return {
-        op: op as "lw" | "lh" | "lb" | "lhu" | "lbu",
-        rd,
-        offset: Number(mem[1]),
-        rs1,
-      };
-    }
-  }
-  // Branches: rs1, rs2, label
-  if ((["beq", "bne", "blt", "bge", "bltu", "bgeu"] as string[]).includes(op)) {
-    const rs1 = parseReg(args[0], raw);
-    const rs2 = parseReg(args[1], raw);
-    if (rs1 instanceof AppError) return rs1;
-    if (rs2 instanceof AppError) return rs2;
-    return {
-      op: op as "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu",
-      rs1,
-      rs2,
-      target: args[2]!,
-    };
-  }
-
-  return new AppError(`Unknown instruction: '${s}'`);
-}
 
 // ─── Pseudo-instruction expander ─────────────────────────────────────────
 function assembleInstr(
@@ -196,7 +39,7 @@ function assembleInstr(
     const offset = labelAddr - addr;
     if (offset < JAL_MIN || offset > JAL_MAX)
       return new AppError(
-        `Jump to '${target}' is out of JAL range (\u00b11 MiB)`,
+        `Jump to '${target}' is out of JAL range (±1 MiB)`,
         `Instruction: ${raw}` + (label ? `, label: ${label}` : ""),
       );
     return offset as Imm<21>;
@@ -207,7 +50,7 @@ function assembleInstr(
     const offset = labelAddr - addr;
     if (offset < BR_MIN || offset > BR_MAX)
       return new AppError(
-        `Branch to '${target}' is out of range (\u00b14 KiB)`,
+        `Branch to '${target}' is out of range (±4 KiB)`,
         `Instruction: ${raw}` + (label ? `, label: ${label}` : ""),
       );
     return offset as Imm<13>;
@@ -339,24 +182,6 @@ function worstCaseSize(parsed: ParsedInstr): number {
   return 1;
 }
 
-type ParsedLine = { label: string | null; raw: string; parsed: ParsedInstr };
-
-function parseProgram(prog: Program): ParsedLine[] | AppError {
-  const parsedLines: ParsedLine[] = [];
-  let currentLabel: string | null = null;
-  for (const rawLine of prog.assembly.split("\n")) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith("#") || line.startsWith("//")) continue;
-    if (line.endsWith(":")) {
-      currentLabel = line.slice(0, -1).trim();
-      continue;
-    }
-    const parsed = parseInstr(line);
-    if (parsed instanceof AppError) return parsed;
-    parsedLines.push({ label: currentLabel, raw: line, parsed });
-  }
-  return parsedLines;
-}
 
 export function assembleProgram(prog: Program): AssemblyResult | AppError {
   // ── Range validation: all numeric config values must fit in 32 bits ───────
