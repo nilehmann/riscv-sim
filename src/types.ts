@@ -115,15 +115,26 @@ export class AppError {
   ) {}
 }
 
-export type ConcreteSpec =
-  | { op: "jalr"; rd: Reg; rs1: Reg; imm: number }
-  | { op: "lui" | "auipc"; rd: Reg; imm: number }
-  | { op: "jal"; rd: Reg; target: number } // PC-relative offset
+declare const __bits: unique symbol;
+export type Imm<N extends number> = number & { [__bits]: N };
+
+export function imm<N extends number>(value: number, bits: N): Imm<N> | AppError {
+  const min = -(1 << (bits - 1));
+  const max = (1 << (bits - 1)) - 1;
+  if (value < min || value > max)
+    return new AppError(`Immediate ${value} does not fit in a signed ${bits}-bit field`);
+  return value as Imm<N>;
+}
+
+export type Instr =
+  | { op: "jalr"; rd: Reg; rs1: Reg; imm: Imm<12> }
+  | { op: "lui" | "auipc"; rd: Reg; imm: Imm<20> }
+  | { op: "jal"; rd: Reg; target: Imm<21> } // PC-relative offset
   | {
       op: "addi" | "slli" | "srli" | "srai" | "andi" | "ori" | "xori";
       rd: Reg;
       rs1: Reg;
-      imm: number;
+      imm: Imm<12>;
     }
   | {
       op:
@@ -145,22 +156,22 @@ export type ConcreteSpec =
   | {
       op: "lw" | "lh" | "lb" | "lhu" | "lbu";
       rd: Reg;
-      offset: number;
+      offset: Imm<12>;
       rs1: Reg;
     }
-  | { op: "sw" | "sh" | "sb"; rs2: Reg; offset: number; rs1: Reg }
+  | { op: "sw" | "sh" | "sb"; rs2: Reg; offset: Imm<12>; rs1: Reg }
   | {
       op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu";
       rs1: Reg;
       rs2: Reg;
-      target: number; // PC-relative offset
+      target: Imm<13>; // PC-relative offset
     };
 
 export interface SourceInstr {
   label: string;
   raw: string;
   parsed: ParsedInstr;
-  concretes: ConcreteSpec[];
+  concretes: Instr[];
   firstAddr: number;
 }
 

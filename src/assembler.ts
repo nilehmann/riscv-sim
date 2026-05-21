@@ -1,16 +1,21 @@
 import type {
   Program,
   ParsedInstr,
-  ConcreteSpec,
+  Instr,
   AssemblyResult,
   SourceInstr,
   Reg,
 } from "./types";
-import { AppError, isReg } from "./types";
+import { AppError, isReg, imm } from "./types";
+import type { Imm } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 export const hx = (v: number, bytes: 1 | 2 | 4 = 4): string =>
-  "0x" + (v >>> 0).toString(16).toUpperCase().padStart(bytes * 2, "0");
+  "0x" +
+  (v >>> 0)
+    .toString(16)
+    .toUpperCase()
+    .padStart(bytes * 2, "0");
 
 // Normalises a register name (accepting the fp alias) and validates it.
 // Returns the canonical Reg, or AppError if the name is not a valid register.
@@ -177,7 +182,7 @@ function assembleInstr(
   labels: Record<string, number>,
   raw: string,
   label: string,
-): ConcreteSpec[] | AppError {
+): Instr[] | AppError {
   const p = parsed;
   // JAL range: signed 21-bit offset, must be multiple of 2 → ±1 MiB
   const JAL_MAX = (1 << 20) - 1;
@@ -186,7 +191,7 @@ function assembleInstr(
   const BR_MAX = (1 << 12) - 1;
   const BR_MIN = -(1 << 12);
 
-  function resolveJalOffset(target: string): number | AppError {
+  function resolveJalOffset(target: string): Imm<21> | AppError {
     const labelAddr = labels[target];
     const offset = labelAddr - addr;
     if (offset < JAL_MIN || offset > JAL_MAX)
@@ -194,10 +199,10 @@ function assembleInstr(
         `Jump to '${target}' is out of JAL range (\u00b11 MiB)`,
         `Instruction: ${raw}` + (label ? `, label: ${label}` : ""),
       );
-    return offset;
+    return offset as Imm<21>;
   }
 
-  function resolveBranchOffset(target: string): number | AppError {
+  function resolveBranchOffset(target: string): Imm<13> | AppError {
     const labelAddr = labels[target];
     const offset = labelAddr - addr;
     if (offset < BR_MIN || offset > BR_MAX)
@@ -205,16 +210,19 @@ function assembleInstr(
         `Branch to '${target}' is out of range (\u00b14 KiB)`,
         `Instruction: ${raw}` + (label ? `, label: ${label}` : ""),
       );
-    return offset;
+    return offset as Imm<13>;
   }
 
   switch (p.op) {
     case "ret":
-      return [{ op: "jalr", rd: "zero", rs1: "ra", imm: 0 }];
+      return [{ op: "jalr", rd: "zero", rs1: "ra", imm: 0 as Imm<12> }];
     case "nop":
-      return [{ op: "addi", rd: "zero", rs1: "zero", imm: 0 }];
-    case "jalr":
-      return [{ op: "jalr", rd: p.rd, rs1: p.rs1, imm: p.imm }];
+      return [{ op: "addi", rd: "zero", rs1: "zero", imm: 0 as Imm<12> }];
+    case "jalr": {
+      const immVal = imm(p.imm, 12);
+      if (immVal instanceof AppError) return immVal;
+      return [{ op: "jalr", rd: p.rd, rs1: p.rs1, imm: immVal }];
+    }
     case "call": {
       const offset = resolveJalOffset(p.target);
       if (offset instanceof AppError) {
@@ -224,8 +232,8 @@ function assembleInstr(
         const lo = ((off & 0xfff) << 20) >> 20;
         const hi = (off - lo) >> 12;
         return [
-          { op: "auipc", rd: "ra", imm: hi },
-          { op: "jalr", rd: "ra", rs1: "ra", imm: lo },
+          { op: "auipc", rd: "ra", imm: hi as Imm<20> },
+          { op: "jalr", rd: "ra", rs1: "ra", imm: lo as Imm<12> },
         ];
       }
       return [{ op: "jal", rd: "ra", target: offset }];
@@ -241,22 +249,25 @@ function assembleInstr(
       return [{ op: "jal", rd: p.rd, target: offset }];
     }
     case "jr": {
-      return [{ op: "jalr", rd: "zero", rs1: p.rs, imm: 0 }];
+      return [{ op: "jalr", rd: "zero", rs1: p.rs, imm: 0 as Imm<12> }];
     }
     case "li": {
       if (p.imm >= -2048 && p.imm <= 2047)
-        return [{ op: "addi", rd: p.rd, rs1: "zero", imm: p.imm }];
+        return [{ op: "addi", rd: p.rd, rs1: "zero", imm: p.imm as Imm<12> }];
       const lo = (p.imm << 20) >> 20;
       const hi = (p.imm - lo) >> 12;
       return [
-        { op: "lui", rd: p.rd, imm: hi },
-        { op: "addi", rd: p.rd, rs1: p.rd, imm: lo },
+        { op: "lui", rd: p.rd, imm: hi as Imm<20> },
+        { op: "addi", rd: p.rd, rs1: p.rd, imm: lo as Imm<12> },
       ];
     }
-    case "lui":
-      return [{ op: "lui", rd: p.rd, imm: p.imm }];
+    case "lui": {
+      const immVal = imm(p.imm, 20);
+      if (immVal instanceof AppError) return immVal;
+      return [{ op: "lui", rd: p.rd, imm: immVal }];
+    }
     case "mv":
-      return [{ op: "addi", rd: p.rd, rs1: p.rs1, imm: 0 }];
+      return [{ op: "addi", rd: p.rd, rs1: p.rs1, imm: 0 as Imm<12> }];
     case "neg":
       return [{ op: "sub", rd: p.rd, rs1: "zero", rs2: p.rs1 }];
     case "addi":
@@ -265,8 +276,11 @@ function assembleInstr(
     case "srai":
     case "andi":
     case "ori":
-    case "xori":
-      return [{ op: p.op, rd: p.rd, rs1: p.rs1, imm: p.imm }];
+    case "xori": {
+      const immVal = imm(p.imm, 12);
+      if (immVal instanceof AppError) return immVal;
+      return [{ op: p.op, rd: p.rd, rs1: p.rs1, imm: immVal }];
+    }
     case "add":
     case "sub":
     case "mul":
@@ -281,14 +295,20 @@ function assembleInstr(
       return [{ op: p.op, rd: p.rd, rs1: p.rs1, rs2: p.rs2 }];
     case "sw":
     case "sh":
-    case "sb":
-      return [{ op: p.op, rs2: p.rs2, offset: p.offset, rs1: p.rs1 }];
+    case "sb": {
+      const offsetVal = imm(p.offset, 12);
+      if (offsetVal instanceof AppError) return offsetVal;
+      return [{ op: p.op, rs2: p.rs2, offset: offsetVal, rs1: p.rs1 }];
+    }
     case "lw":
     case "lh":
     case "lb":
     case "lhu":
-    case "lbu":
-      return [{ op: p.op, rd: p.rd, offset: p.offset, rs1: p.rs1 }];
+    case "lbu": {
+      const offsetVal = imm(p.offset, 12);
+      if (offsetVal instanceof AppError) return offsetVal;
+      return [{ op: p.op, rd: p.rd, offset: offsetVal, rs1: p.rs1 }];
+    }
     case "beq":
     case "bne":
     case "blt":
@@ -382,7 +402,7 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
     const assembled = assembleInstr(parsed, addr, labels, raw, label);
     if (assembled instanceof AppError) return assembled;
     const firstAddr = addr;
-    const concretes: ConcreteSpec[] = [];
+    const concretes: Instr[] = [];
     for (const spec of assembled) {
       addrToSourceIdx.set(addr, sourceInstrs.length);
       concretes.push(spec);
@@ -426,7 +446,7 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
       if (si.concretes.length === 1) {
         const ci = si.concretes[0]!;
         if (ci.op === "jal")
-          (ci as { target: number }).target = realAddr - si.firstAddr;
+          (ci as { target: Imm<21> }).target = (realAddr - si.firstAddr) as Imm<21>;
       } else if (si.concretes.length === 2) {
         const auipc = si.concretes[0]!;
         const jalr = si.concretes[1]!;
@@ -434,8 +454,8 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
           const off = realAddr - si.firstAddr;
           const lo = ((off & 0xfff) << 20) >> 20;
           const hi = (off - lo) >> 12;
-          (auipc as { imm: number }).imm = hi;
-          (jalr as { imm: number }).imm = lo;
+          (auipc as { imm: Imm<20> }).imm = hi as Imm<20>;
+          (jalr as { imm: Imm<12> }).imm = lo as Imm<12>;
         }
       }
     } else if (BRANCH_OPS.has(p.op)) {
@@ -443,7 +463,7 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
       const realAddr = realLabels[target];
       if (realAddr == null) continue;
       const ci = si.concretes[0]!;
-      (ci as { target: number }).target = realAddr - si.firstAddr;
+      (ci as { target: Imm<13> }).target = (realAddr - si.firstAddr) as Imm<13>;
     }
   }
 
@@ -469,7 +489,7 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
 }
 
 // ─── Concrete instruction serializer ──────────────────────────────────────
-export function fmtConcreteRel(c: ConcreteSpec, addr: number): string {
+export function fmtConcreteRel(c: Instr, addr: number): string {
   if (c.op === "jalr") return `jalr ${c.rd}, ${c.imm}(${c.rs1})`;
   if (c.op === "jal")
     return `jal ${c.rd}, ${c.target >= 0 ? "+" : ""}${c.target}`;
@@ -479,7 +499,7 @@ export function fmtConcreteRel(c: ConcreteSpec, addr: number): string {
       ["addi", "andi", "ori", "xori", "slli", "srli", "srai"] as string[]
     ).includes(c.op)
   ) {
-    const ci = c as ConcreteSpec & { rd: string; rs1: string; imm: number };
+    const ci = c as Instr & { rd: string; rs1: string; imm: number };
     return `${ci.op} ${ci.rd}, ${ci.rs1}, ${ci.imm}`;
   }
   if (
@@ -499,19 +519,19 @@ export function fmtConcreteRel(c: ConcreteSpec, addr: number): string {
       ] as string[]
     ).includes(c.op)
   ) {
-    const ci = c as ConcreteSpec & { rd: string; rs1: string; rs2: string };
+    const ci = c as Instr & { rd: string; rs1: string; rs2: string };
     return `${ci.op} ${ci.rd}, ${ci.rs1}, ${ci.rs2}`;
   }
   if (c.op === "sw" || c.op === "sb" || c.op === "sh")
     return `${c.op} ${c.rs2}, ${c.offset}(${c.rs1})`;
   if ((["lw", "lb", "lh", "lbu", "lhu"] as string[]).includes(c.op)) {
-    const ci = c as ConcreteSpec & { rd: string; offset: number; rs1: string };
+    const ci = c as Instr & { rd: string; offset: number; rs1: string };
     return `${ci.op} ${ci.rd}, ${ci.offset}(${ci.rs1})`;
   }
   if (
     (["beq", "bne", "blt", "bge", "bltu", "bgeu"] as string[]).includes(c.op)
   ) {
-    const ci = c as ConcreteSpec & { rs1: string; rs2: string; target: number };
+    const ci = c as Instr & { rs1: string; rs2: string; target: number };
     return `${ci.op} ${ci.rs1}, ${ci.rs2}, ${ci.target >= 0 ? "+" : ""}${ci.target}`;
   }
   return c.op;
