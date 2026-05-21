@@ -1,10 +1,8 @@
 <script lang="ts">
     import type { FrameInfo, Step } from "./types";
     import { sim, ui } from "./state.svelte";
-    import { hx } from "./assembler";
-    import { subSlots, garbageWord } from "./memUtils";
-    import HexValue from "./HexValue.svelte";
-    import SlotMode from "./SlotMode.svelte";
+    import { garbageWord } from "./memUtils";
+    import StackSlot from "./StackSlot.svelte";
 
     // ─── Constants ────────────────────────────────────────────────────────
     const FRAME_COLORS = [
@@ -34,11 +32,11 @@
 
     const hiS = $derived(new Set(step?.hiSlots ?? []));
 
-    // Ghost rows above (caller)
+    // Ghost rows above (caller) — includes callerBase itself as the last opaque row
     const callerGhostRows = $derived(
-        Array.from({ length: GHOST_ROWS }, (_, i) => ({
+        Array.from({ length: GHOST_ROWS + 1 }, (_, i) => ({
             addr: callerBase + (GHOST_ROWS - i) * 4,
-            opacity: ((i + 1) / (GHOST_ROWS + 1)).toFixed(2),
+            opacity: i < GHOST_ROWS ? ((i + 1) / (GHOST_ROWS + 1)).toFixed(2) : "1",
         })),
     );
 
@@ -216,10 +214,6 @@
         return ui.slotViewMode.get(key) ?? 'word';
     }
 
-    const callerBaseKey = $derived(`stack-${callerBase.toString(16)}`);
-    const callerBaseMode = $derived(slotMode(callerBaseKey));
-    const callerBaseGWord = $derived(garbageWord(callerBase));
-
     function setSlotMode(key: string, mode: 'word' | 'halfword' | 'byte') {
         const next = new Map(ui.slotViewMode);
         next.set(key, mode);
@@ -281,77 +275,23 @@
                         {@const key = `stack-${row.addr.toString(16)}`}
                         {@const mode = slotMode(key)}
                         {@const gWord = garbageWord(row.addr)}
+                        {@const memVal = getSlotMemVal(row.addr)}
                         <div
                             class="frame-slot"
                             id="slot-{row.addr.toString(16)}"
                             style="opacity:{row.opacity}"
                             use:registerSlotAction={row.addr}
                         >
-                            <div class="slot-header">
-                                <SlotMode {mode} disabled={!ui.showGarbage} transparent onchange={(m) => setSlotMode(key, m)} />
-                                {#if mode === 'word'}
-                                    <span class="slot-name">{hx(row.addr)}</span>
-                                {:else}
-                                    <div class="sub-slots-col">
-                                        {#each subSlots(row.addr, 4, mode).toReversed() as sub}
-                                            {@const byteOff = sub.addr - row.addr}
-                                            {@const subGarbage = (gWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
-                                            <div class="sub-slot" data-addr={sub.addr}>
-                                                <span class="slot-name">{hx(sub.addr)}</span>
-                                                {#if ui.showGarbage}
-                                                    <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
-                                                {:else}
-                                                    <span class="slot-uninit">—</span>
-                                                {/if}
-                                            </div>
-                                        {/each}
-                                    </div>
-                                {/if}
-                            </div>
-                            {#if mode === 'word'}
-                                {#if ui.showGarbage}
-                                    <HexValue value={gWord} faint={true} />
-                                {:else}
-                                    <span class="slot-uninit">—</span>
-                                {/if}
-                            {/if}
+                            <StackSlot
+                                addr={row.addr}
+                                {mode}
+                                {memVal}
+                                {gWord}
+                                disabled={!ui.showGarbage && memVal === undefined}
+                                onModeChange={(m) => setSlotMode(key, m)}
+                            />
                         </div>
                     {/each}
-                    <!-- Boundary slot at callerBase -->
-                    <div
-                        class="frame-slot"
-                        id="slot-{callerBase.toString(16)}"
-                        use:registerSlotAction={callerBase}
-                    >
-                        <div class="slot-header">
-                            <SlotMode mode={callerBaseMode} disabled={!ui.showGarbage} transparent onchange={(m) => setSlotMode(callerBaseKey, m)} />
-                            {#if callerBaseMode === 'word'}
-                                <span class="slot-name">{hx(callerBase)}</span>
-                            {:else}
-                                <div class="sub-slots-col">
-                                    {#each subSlots(callerBase, 4, callerBaseMode).toReversed() as sub}
-                                        {@const byteOff = sub.addr - callerBase}
-                                        {@const subGarbage = (callerBaseGWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
-                                        <div class="sub-slot" data-addr={sub.addr}>
-                                            <span class="slot-name">{hx(sub.addr)}</span>
-                                            {#if ui.showGarbage}
-                                                <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
-                                            {:else}
-                                                <span class="slot-uninit">—</span>
-                                            {/if}
-                                        </div>
-                                    {/each}
-                                </div>
-                            {/if}
-                        </div>
-                        {#if callerBaseMode === 'word'}
-                            {#if ui.showGarbage}
-                                <HexValue value={callerBaseGWord} faint={true} />
-                            {:else}
-                                <span class="slot-uninit" style="color:var(--text-faint)">—</span>
-                            {/if}
-                        {/if}
-                    </div>
                 </div>
 
                 <!-- Active frames -->
@@ -383,40 +323,15 @@
                                 style="background:{color}"
                                 use:registerSlotAction={addr}
                             >
-                                <div class="slot-header">
-                                    <SlotMode {mode} disabled={!ui.showGarbage && memVal === undefined} transparent onchange={(m) => setSlotMode(key, m)} />
-                                    {#if mode === 'word'}
-                                        <span class="slot-name">{label ? `${hx(addr)}  ${label}` : hx(addr)}</span>
-                                    {:else}
-                                        <div class="sub-slots-col">
-                                            {#each subSlots(addr, 4, mode).toReversed() as sub, si}
-                                                {@const subVal = step?.mem.get(sub.addr)}
-                                                {@const subLabel = si === 0 ? label : null}
-                                                {@const byteOff = sub.addr - addr}
-                                                {@const subGarbage = (gWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
-                                                <div class="sub-slot" data-addr={sub.addr}>
-                                                    <span class="slot-name">{subLabel ? `${hx(sub.addr)}  ${subLabel}` : hx(sub.addr)}</span>
-                                                    {#if subVal !== undefined}
-                                                        <HexValue value={subVal} elementSize={sub.size} />
-                                                    {:else if ui.showGarbage}
-                                                        <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
-                                                    {:else}
-                                                        <span class="slot-uninit">—</span>
-                                                    {/if}
-                                                </div>
-                                            {/each}
-                                        </div>
-                                    {/if}
-                                </div>
-                                {#if mode === 'word'}
-                                    {#if memVal !== undefined}
-                                        <HexValue value={memVal} />
-                                    {:else if ui.showGarbage}
-                                        <HexValue value={gWord} faint={true} />
-                                    {:else}
-                                        <span class="slot-uninit">—</span>
-                                    {/if}
-                                {/if}
+                                <StackSlot
+                                    {addr}
+                                    {mode}
+                                    {memVal}
+                                    {gWord}
+                                    {label}
+                                    disabled={!ui.showGarbage && memVal === undefined}
+                                    onModeChange={(m) => setSlotMode(key, m)}
+                                />
                             </div>
                         {/each}
                     </div>
@@ -428,39 +343,21 @@
                         {@const key = `stack-${row.addr.toString(16)}`}
                         {@const mode = slotMode(key)}
                         {@const gWord = garbageWord(row.addr)}
+                        {@const memVal = getSlotMemVal(row.addr)}
                         <div
                             class="frame-slot"
                             style="opacity:{row.opacity};background:var(--bg);border-top-style:dashed"
                             use:registerSlotAction={row.addr}
                         >
-                            <div class="slot-header">
-                                <SlotMode {mode} disabled={!ui.showGarbage} transparent onchange={(m) => setSlotMode(key, m)} />
-                                {#if mode === 'word'}
-                                    <span class="slot-name">{hx(row.addr)}</span>
-                                {:else}
-                                    <div class="sub-slots-col">
-                                        {#each subSlots(row.addr, 4, mode).toReversed() as sub}
-                                            {@const byteOff = sub.addr - row.addr}
-                                            {@const subGarbage = (gWord >>> (byteOff * 8)) & (sub.size === 1 ? 0xff : 0xffff)}
-                                            <div class="sub-slot" data-addr={sub.addr}>
-                                                <span class="slot-name">{hx(sub.addr)}</span>
-                                                {#if ui.showGarbage}
-                                                    <HexValue value={subGarbage} elementSize={sub.size} faint={true} />
-                                                {:else}
-                                                    <span class="slot-uninit">—</span>
-                                                {/if}
-                                            </div>
-                                        {/each}
-                                    </div>
-                                {/if}
-                            </div>
-                            {#if mode === 'word'}
-                                {#if ui.showGarbage}
-                                    <HexValue value={gWord} faint={true} />
-                                {:else}
-                                    <span class="slot-uninit" style="color:var(--text-faint)">—</span>
-                                {/if}
-                            {/if}
+                            <StackSlot
+                                addr={row.addr}
+                                {mode}
+                                {memVal}
+                                {gWord}
+                                faint={true}
+                                disabled={true}
+                                onModeChange={(m) => setSlotMode(key, m)}
+                            />
                         </div>
                     {/each}
                     <div class="frame-ellipsis">
@@ -477,30 +374,6 @@
 </div>
 
 <style>
-    .slot-header {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-    }
-
-    .sub-slots-col {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        flex: 1;
-    }
-    .sub-slot {
-        display: flex;
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: center;
-        width: 100%;
-    }
-    .sub-addr {
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--text-faint);
-    }
     .stack-area {
         flex: 1;
         overflow-y: auto;
@@ -651,9 +524,6 @@
         background: var(--surface);
         position: relative;
     }
-    .frame-slot .slot-header:only-child {
-        flex: 1;
-    }
     .frame-slot::after {
         content: "";
         position: absolute;
@@ -695,19 +565,7 @@
     .frame.free .frame-slot {
         background: var(--bg);
         border-top-style: dashed;
-    }
-    .frame.free .slot-name,
-    .frame.free .slot-uninit {
-        color: var(--text-faint);
-    }
-    .slot-name {
-        color: var(--text-dim);
-    }
-    .slot-uninit {
-        color: var(--text);
-        font-weight: 600;
-        font-family: var(--mono);
-        font-size: 16px;
+        pointer-events: none;
     }
     .scrollable::-webkit-scrollbar {
         width: 4px;
