@@ -168,7 +168,7 @@ export type Instr =
     };
 
 export interface SourceInstr {
-  label: string;
+  label: string | null;
   raw: string;
   parsed: ParsedInstr;
   concretes: Instr[];

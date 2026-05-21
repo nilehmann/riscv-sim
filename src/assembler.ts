@@ -181,7 +181,7 @@ function assembleInstr(
   addr: number,
   labels: Record<string, number>,
   raw: string,
-  label: string,
+  label: string | null,
 ): Instr[] | AppError {
   const p = parsed;
   // JAL range: signed 21-bit offset, must be multiple of 2 → ±1 MiB
@@ -339,11 +339,11 @@ function worstCaseSize(parsed: ParsedInstr): number {
   return 1;
 }
 
-type ParsedLine = { label: string; raw: string; parsed: ParsedInstr };
+type ParsedLine = { label: string | null; raw: string; parsed: ParsedInstr };
 
 function parseProgram(prog: Program): ParsedLine[] | AppError {
   const parsedLines: ParsedLine[] = [];
-  let currentLabel = "";
+  let currentLabel: string | null = null;
   for (const rawLine of prog.assembly.split("\n")) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#") || line.startsWith("//")) continue;
@@ -384,9 +384,9 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
   // Pass 1: section-relative addresses from 0 (baseAddress not involved).
   const labels: Record<string, number> = {};
   let addr = 0;
-  let prevLabel = "";
+  let prevLabel: string | null = null;
   for (const { label, parsed } of parsedLines) {
-    if (label !== prevLabel) {
+    if (label !== null && label !== prevLabel) {
       labels[label] = addr;
       prevLabel = label;
     }
@@ -432,7 +432,7 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
   // Build real section-relative label addresses from actual pass-2 positions.
   const realLabels: Record<string, number> = {};
   for (const si of sourceInstrs) {
-    if (!(si.label in realLabels)) realLabels[si.label] = si.firstAddr;
+    if (si.label !== null && !(si.label in realLabels)) realLabels[si.label] = si.firstAddr;
   }
 
   // Fixup jump/branch targets using real section-relative addresses.
