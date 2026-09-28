@@ -55,11 +55,11 @@
     ]);
 
     const structuralTheme = EditorView.theme({
-        "&": { fontSize: "13px" },
+        "&": { fontSize: "20px" },
         "&.cm-focused": { outline: "none" },
         ".cm-content": { fontFamily: "var(--mono)", caretColor: "var(--text)" },
         ".cm-gutters": { fontFamily: "var(--mono)" },
-        ".cm-scroller": { lineHeight: "1.5" },
+        ".cm-scroller": { lineHeight: "1.6" },
         ".cm-activeLine": { background: "rgba(128,128,128,0.05)" },
         ".cm-activeLineGutter": { background: "rgba(128,128,128,0.05)" },
     });
@@ -407,7 +407,7 @@
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 8px;
-        width: 680px;
+        width: 920px;
         max-width: 95vw;
         max-height: 90vh;
         display: flex;
@@ -418,13 +418,13 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 14px 16px 12px;
+        padding: 18px 20px 16px;
         border-bottom: 1px solid var(--border);
         flex-shrink: 0;
     }
     .panel-title {
         font-family: var(--sans);
-        font-size: 14px;
+        font-size: 19px;
         font-weight: 600;
         color: var(--text);
     }
@@ -432,7 +432,7 @@
         background: none;
         border: none;
         cursor: pointer;
-        font-size: 18px;
+        font-size: 24px;
         line-height: 1;
         color: var(--text-dim);
         padding: 0 2px;
@@ -441,51 +441,51 @@
         color: var(--text);
     }
     .panel-body {
-        padding: 16px;
+        padding: 20px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: 14px;
+        gap: 18px;
         flex: 1;
         min-height: 0;
     }
     .panel-footer {
         display: flex;
         justify-content: flex-end;
-        gap: 8px;
-        padding: 12px 16px;
+        gap: 10px;
+        padding: 16px 20px;
         border-top: 1px solid var(--border);
         flex-shrink: 0;
     }
     .row2 {
         display: flex;
-        gap: 10px;
+        gap: 12px;
     }
     .field {
         display: flex;
         flex-direction: column;
-        gap: 5px;
+        gap: 6px;
         flex: 1;
     }
     .field-narrow {
-        flex: 0 0 120px;
+        flex: 0 0 160px;
     }
     .field-label {
         font-family: var(--sans);
-        font-size: 11px;
+        font-size: 14px;
         font-weight: 600;
         color: var(--text-dim);
         text-transform: uppercase;
         letter-spacing: 0.05em;
     }
     .input {
-        padding: 6px 8px;
+        padding: 8px 10px;
         border: 1px solid var(--border);
         border-radius: 6px;
         background: var(--surface2);
         color: var(--text);
         font-family: var(--sans);
-        font-size: 13px;
+        font-size: 16px;
     }
     .input:focus {
         outline: none;
@@ -504,20 +504,20 @@
         border-color: var(--blue);
     }
     .asm-editor-wrap :global(.cm-editor) {
-        min-height: 220px;
+        min-height: 300px;
     }
     .regs-list {
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 8px;
     }
     .reg-row {
         display: flex;
-        gap: 6px;
+        gap: 8px;
         align-items: center;
     }
     .reg-name {
-        flex: 0 0 80px;
+        flex: 0 0 100px;
     }
     .input.invalid {
         border-color: var(--red);
@@ -531,7 +531,7 @@
         background: none;
         border: none;
         cursor: pointer;
-        font-size: 16px;
+        font-size: 20px;
         color: var(--text-faint);
         padding: 0 4px;
         line-height: 1;
@@ -547,8 +547,8 @@
         border-radius: 6px;
         color: var(--text-dim);
         font-family: var(--sans);
-        font-size: 12px;
-        padding: 4px 10px;
+        font-size: 15px;
+        padding: 5px 12px;
         cursor: pointer;
     }
     .add-reg-btn:hover {
@@ -562,19 +562,19 @@
     }
     .toggle-label {
         font-family: var(--sans);
-        font-size: 13px;
+        font-size: 16px;
         color: var(--text);
     }
     .toggle-btn {
-        padding: 4px 14px;
+        padding: 6px 18px;
         border: 1px solid var(--border);
         border-radius: 6px;
         background: var(--surface2);
         color: var(--text-dim);
         font-family: var(--sans);
-        font-size: 13px;
+        font-size: 16px;
         cursor: pointer;
-        min-width: 48px;
+        min-width: 58px;
     }
     .toggle-btn:hover {
         border-color: var(--text-faint);
@@ -592,14 +592,14 @@
         border-radius: 6px;
         color: var(--red);
         font-family: var(--mono);
-        font-size: 12px;
-        padding: 8px 12px;
+        font-size: 15px;
+        padding: 10px 14px;
         white-space: pre-wrap;
     }
     .btn {
         font-family: var(--sans);
-        font-size: 13px;
-        padding: 6px 16px;
+        font-size: 16px;
+        padding: 8px 20px;
         border-radius: 6px;
         border: 1px solid var(--border);
         cursor: pointer;
@@ -624,19 +624,19 @@
     .regions-list {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 10px;
     }
     .region-card {
         border: 1px solid var(--border);
         border-radius: 6px;
-        padding: 8px 10px;
+        padding: 10px 12px;
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 8px;
     }
     .region-header {
         display: flex;
-        gap: 6px;
+        gap: 8px;
         align-items: center;
     }
     .region-addr {
@@ -644,16 +644,16 @@
     }
     .size-group {
         display: flex;
-        gap: 2px;
+        gap: 3px;
     }
     .size-btn {
-        padding: 4px 8px;
+        padding: 5px 10px;
         border: 1px solid var(--border);
         border-radius: 4px;
         background: var(--surface);
         color: var(--text-dim);
         font-family: var(--mono);
-        font-size: 12px;
+        font-size: 14px;
         cursor: pointer;
     }
     .size-btn.active {
@@ -663,22 +663,22 @@
         font-weight: 600;
     }
     .elements-scroll {
-        max-height: 10rem;
+        max-height: 12rem;
         overflow-y: auto;
         direction: rtl;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 5px;
     }
     .elem-row {
         direction: ltr;
         display: flex;
-        gap: 6px;
+        gap: 8px;
         align-items: center;
     }
     .elem-idx {
-        flex: 0 0 2.5rem;
-        font-size: 12px;
+        flex: 0 0 3rem;
+        font-size: 14px;
         color: var(--text-faint);
         text-align: right;
     }
