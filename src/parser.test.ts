@@ -1,6 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { parseInstr } from "./parser";
+import { assembleProgram } from "./assembler";
+import { simulate } from "./simulator";
 import { AppError } from "./types";
+import type { Program } from "./types";
 
 function ok(raw: string) {
   const r = parseInstr(raw);
@@ -133,6 +136,32 @@ describe("branches", () => {
   test("bad register", () => err("beq notareg, a1, loop"));
 });
 
+describe("branch pseudo-ops", () => {
+  test("beqz", () =>
+    expect(ok("beqz a0, done")).toEqual({ op: "beqz", rs1: "a0", target: "done" }));
+  test("bnez", () =>
+    expect(ok("bnez a0, done")).toEqual({ op: "bnez", rs1: "a0", target: "done" }));
+  test("bltz", () =>
+    expect(ok("bltz t0, neg")).toEqual({ op: "bltz", rs1: "t0", target: "neg" }));
+  test("bgez", () =>
+    expect(ok("bgez t0, pos")).toEqual({ op: "bgez", rs1: "t0", target: "pos" }));
+  test("bgtz", () =>
+    expect(ok("bgtz t0, pos")).toEqual({ op: "bgtz", rs1: "t0", target: "pos" }));
+  test("blez", () =>
+    expect(ok("blez t0, neg")).toEqual({ op: "blez", rs1: "t0", target: "neg" }));
+  test("bgt", () =>
+    expect(ok("bgt a0, a1, loop")).toEqual({ op: "bgt", rs1: "a0", rs2: "a1", target: "loop" }));
+  test("ble", () =>
+    expect(ok("ble a0, a1, loop")).toEqual({ op: "ble", rs1: "a0", rs2: "a1", target: "loop" }));
+  test("bgtu", () =>
+    expect(ok("bgtu a0, a1, loop")).toEqual({ op: "bgtu", rs1: "a0", rs2: "a1", target: "loop" }));
+  test("bleu", () =>
+    expect(ok("bleu a0, a1, loop")).toEqual({ op: "bleu", rs1: "a0", rs2: "a1", target: "loop" }));
+  test("zero-branch missing label", () => err("beqz a0"));
+  test("swap-branch missing label", () => err("bgt a0, a1"));
+  test("zero-branch bad register", () => err("beqz notareg, done"));
+});
+
 // ─── jalr ─────────────────────────────────────────────────────────────────────
 
 describe("jalr", () => {
@@ -183,6 +212,50 @@ describe("pseudo-ops", () => {
     expect(ok("neg a0, a1")).toEqual({ op: "neg", rd: "a0", rs1: "a1" }));
   test("fp alias resolves to s0", () =>
     expect(ok("mv a0, fp")).toEqual({ op: "mv", rd: "a0", rs1: "s0" }));
+});
+
+// ─── Branch pseudo-op semantics (full assemble + simulate) ────────────────────
+
+describe("branch pseudo-ops semantics", () => {
+  function run(assembly: string, initialRegs: Record<string, number>) {
+    const prog: Program = { name: "t", initialRegs, baseAddress: 0x1000, assembly };
+    const assembled = assembleProgram(prog);
+    if (assembled instanceof AppError) throw assembled;
+    const result = simulate(prog, assembled);
+    return result.steps[result.steps.length - 1]!.regs;
+  }
+
+  const prog = (branch: string) => `
+    ${branch}, taken
+    li a0, 1
+    j end
+    taken:
+    li a0, 2
+    end:
+  `;
+
+  test("beqz takes branch when reg == 0", () =>
+    expect(run(prog("beqz zero"), {}).a0).toBe(2));
+  test("bnez does not take branch when reg == 0", () =>
+    expect(run(prog("bnez zero"), {}).a0).toBe(1));
+  test("bltz takes branch when reg < 0", () =>
+    expect(run(prog("bltz a1"), { a1: -1 }).a0).toBe(2));
+  test("bgez does not take branch when reg < 0", () =>
+    expect(run(prog("bgez a1"), { a1: -1 }).a0).toBe(1));
+  test("bgtz takes branch when reg > 0", () =>
+    expect(run(prog("bgtz a1"), { a1: 5 }).a0).toBe(2));
+  test("blez takes branch when reg == 0", () =>
+    expect(run(prog("blez a1"), { a1: 0 }).a0).toBe(2));
+  test("bgt takes branch when rs1 > rs2", () =>
+    expect(run(prog("bgt a1, a2"), { a1: 5, a2: 3 }).a0).toBe(2));
+  test("bgt does not take branch when rs1 == rs2", () =>
+    expect(run(prog("bgt a1, a2"), { a1: 3, a2: 3 }).a0).toBe(1));
+  test("ble takes branch when rs1 <= rs2", () =>
+    expect(run(prog("ble a1, a2"), { a1: 3, a2: 3 }).a0).toBe(2));
+  test("bgtu treats operands as unsigned", () =>
+    expect(run(prog("bgtu a1, a2"), { a1: -1, a2: 1 }).a0).toBe(2));
+  test("bleu treats operands as unsigned", () =>
+    expect(run(prog("bleu a1, a2"), { a1: 1, a2: -1 }).a0).toBe(2));
 });
 
 // ─── Unknown / empty ──────────────────────────────────────────────────────────

@@ -108,9 +108,24 @@ export type ParsedInstr =
       rs1: Reg;
     }
   | {
-      op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu";
+      op:
+        | "beq"
+        | "bne"
+        | "blt"
+        | "bge"
+        | "bltu"
+        | "bgeu"
+        | "bgt"
+        | "ble"
+        | "bgtu"
+        | "bleu";
       rs1: Reg;
       rs2: Reg;
+      target: string;
+    }
+  | {
+      op: "beqz" | "bnez" | "bltz" | "bgez" | "bgtz" | "blez";
+      rs1: Reg;
       target: string;
     };
 

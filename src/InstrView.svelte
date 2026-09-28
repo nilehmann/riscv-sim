@@ -98,7 +98,19 @@
       case "bge":
       case "bltu":
       case "bgeu":
+      case "bgt":
+      case "ble":
+      case "bgtu":
+      case "bleu":
         push(punct(" "), reg(p.rs1), sep(), reg(p.rs2), sep(), lbl(p.target));
+        break;
+      case "beqz":
+      case "bnez":
+      case "bltz":
+      case "bgez":
+      case "bgtz":
+      case "blez":
+        push(punct(" "), reg(p.rs1), sep(), lbl(p.target));
         break;
     }
     return toks;

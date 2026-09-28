@@ -22,6 +22,8 @@
         "sll", "slli", "srl", "srli", "sra", "srai",
         "lui", "auipc", "jal", "jalr", "ret", "nop",
         "beq", "bne", "blt", "bge", "bltu", "bgeu",
+        "beqz", "bnez", "bltz", "bgez", "bgtz", "blez",
+        "bgt", "ble", "bgtu", "bleu",
         "lw", "lh", "lb", "lhu", "lbu", "sw", "sh", "sb",
         "mv", "neg", "li", "la", "call", "tail", "j", "jr",
     ]);

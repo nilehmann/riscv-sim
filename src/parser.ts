@@ -136,6 +136,18 @@ const SCHEMA: Record<string, OperandSpec[]> = {
   bge: [r("rs1"), r("rs2"), LABEL],
   bltu: [r("rs1"), r("rs2"), LABEL],
   bgeu: [r("rs1"), r("rs2"), LABEL],
+  // Branch pseudo-ops, compare-to-zero: rs1, label
+  beqz: [r("rs1"), LABEL],
+  bnez: [r("rs1"), LABEL],
+  bltz: [r("rs1"), LABEL],
+  bgez: [r("rs1"), LABEL],
+  bgtz: [r("rs1"), LABEL],
+  blez: [r("rs1"), LABEL],
+  // Branch pseudo-ops, operand-swapped: rs1, rs2, label
+  bgt: [r("rs1"), r("rs2"), LABEL],
+  ble: [r("rs1"), r("rs2"), LABEL],
+  bgtu: [r("rs1"), r("rs2"), LABEL],
+  bleu: [r("rs1"), r("rs2"), LABEL],
 };
 
 // ─── Generic operand builder ──────────────────────────────────────────────────

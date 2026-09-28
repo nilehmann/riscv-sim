@@ -157,6 +157,42 @@ function assembleInstr(
       if (offset instanceof AppError) return offset;
       return [{ op: p.op, rs1: p.rs1, rs2: p.rs2, target: offset }];
     }
+    // Operand-swapped pseudo-branches: bgt/ble/bgtu/bleu rs1, rs2, tgt
+    // → real op with rs1/rs2 swapped (bgt a,b == blt b,a).
+    case "bgt":
+    case "ble":
+    case "bgtu":
+    case "bleu": {
+      const offset = resolveBranchOffset(p.target);
+      if (offset instanceof AppError) return offset;
+      const real = { bgt: "blt", ble: "bge", bgtu: "bltu", bleu: "bgeu" }[p.op] as
+        | "blt"
+        | "bge"
+        | "bltu"
+        | "bgeu";
+      return [{ op: real, rs1: p.rs2, rs2: p.rs1, target: offset }];
+    }
+    // Compare-to-zero pseudo-branches: op rs1, tgt → real op with one side "zero".
+    case "beqz":
+    case "bnez":
+    case "bltz":
+    case "bgez": {
+      const offset = resolveBranchOffset(p.target);
+      if (offset instanceof AppError) return offset;
+      const real = { beqz: "beq", bnez: "bne", bltz: "blt", bgez: "bge" }[p.op] as
+        | "beq"
+        | "bne"
+        | "blt"
+        | "bge";
+      return [{ op: real, rs1: p.rs1, rs2: "zero", target: offset }];
+    }
+    case "bgtz":
+    case "blez": {
+      const offset = resolveBranchOffset(p.target);
+      if (offset instanceof AppError) return offset;
+      const real = p.op === "bgtz" ? "blt" : "bge";
+      return [{ op: real, rs1: "zero", rs2: p.rs1, target: offset }];
+    }
     default:
       const _exhaustiveCheck: never = p;
       return _exhaustiveCheck;
@@ -222,7 +258,11 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
 
   // Fixup jump/branch targets using real section-relative addresses.
   // si.firstAddr is the address of concretes[0]; concretes[1] is at +4.
-  const BRANCH_OPS = new Set(["beq", "bne", "blt", "bge", "bltu", "bgeu"]);
+  const BRANCH_OPS = new Set([
+    "beq", "bne", "blt", "bge", "bltu", "bgeu",
+    "beqz", "bnez", "bltz", "bgez", "bgtz", "blez",
+    "bgt", "ble", "bgtu", "bleu",
+  ]);
   for (const si of sourceInstrs) {
     const p = si.parsed;
     if (p.op === "call" || p.op === "jal" || p.op === "j") {
