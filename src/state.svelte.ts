@@ -2,7 +2,7 @@ import type { AssemblyResult, DisplayReg, FrameInfo, Program, Step } from "./typ
 import { AppError, hx } from "./types";
 import { assembleProgram } from "./assembler";
 import { validateProgram, validateAssembled } from "./validation";
-import { ALL_REGS, REG_META, simulate } from "./simulator";
+import { ALL_REGS, REG_META, garbageValue, simulate } from "./simulator";
 import { inferDisplayState } from "./inferDisplay";
 import { PROGRAMS } from "./programs";
 
@@ -174,20 +174,10 @@ export class SimulationState {
 
 export const sim = new SimulationState();
 
-// ─── Random register values for uninitialized display ──────────────────────
-
-function rh(): string {
-  return (
-    "0x" +
-    Math.floor(Math.random() * 0xffffffff)
-      .toString(16)
-      .toUpperCase()
-      .padStart(8, "0")
-  );
-}
+// ─── Deterministic garbage register values for uninitialized display ───────
 
 export const RAND_REGS: Record<string, string> = Object.fromEntries(
-  ALL_REGS.map((r) => [r, rh()]),
+  ALL_REGS.map((r, i) => [r, r === "zero" ? hx(0) : hx(garbageValue(i))]),
 );
 
 export function fmtRegVal(key: string, val: number | null | undefined): string {

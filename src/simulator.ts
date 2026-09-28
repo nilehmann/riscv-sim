@@ -71,10 +71,9 @@ export class Machine {
     stackBase: number,
     osMode: boolean,
   ) {
-    this.regs = Object.fromEntries(ALL_REGS.map((r) => [r, 0])) as Record<
-      Reg,
-      number
-    >;
+    this.regs = Object.fromEntries(
+      ALL_REGS.map((r, i) => [r, r === "zero" ? 0 : garbageValue(i)]),
+    ) as Record<Reg, number>;
     for (const [k, v] of Object.entries(initialRegs)) {
       const r = k === "fp" ? "s0" : k;
       if (isReg(r)) this.regs[r] = v;
