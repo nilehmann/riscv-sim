@@ -85,6 +85,37 @@
         tooltipX = x;
         tooltipY = y;
     }
+
+    // Step navigation: arrow keys or vim h/j/k/l, ignored while typing or in a modal.
+    function isEditableTarget(target: EventTarget | null): boolean {
+        const el = target as HTMLElement | null;
+        if (!el) return false;
+        if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") return true;
+        if (el.isContentEditable) return true;
+        return !!el.closest(".cm-editor");
+    }
+
+    function onKeyDown(e: KeyboardEvent) {
+        if (ui.showEditor || ui.showSettings) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        if (isEditableTarget(e.target)) return;
+        switch (e.key) {
+            case "ArrowRight":
+            case "ArrowDown":
+            case "l":
+            case "j":
+                e.preventDefault();
+                sim.go(1);
+                break;
+            case "ArrowLeft":
+            case "ArrowUp":
+            case "h":
+            case "k":
+                e.preventDefault();
+                sim.go(-1);
+                break;
+        }
+    }
 </script>
 
 <svelte:document
@@ -92,6 +123,7 @@
     onmouseout={onMouseOut}
     onmousemove={onMouseMove}
 />
+<svelte:window onkeydown={onKeyDown} />
 
 <!-- Tooltip (global, single instance) -->
 <div

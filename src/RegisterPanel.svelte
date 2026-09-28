@@ -62,7 +62,7 @@
     }
     .panel-title {
         font-family: var(--mono);
-        font-size: 14px;
+        font-size: 15px;
         letter-spacing: 0.12em;
         text-transform: uppercase;
         color: var(--text-dim);
@@ -82,7 +82,7 @@
         gap: 8px;
     }
     .fp-pill {
-        font-size: 11px;
+        font-size: 12px;
         font-family: var(--mono);
         padding: 1px 6px;
         border: 1px solid var(--text-faint);
@@ -126,18 +126,21 @@
     }
     .reg-name {
         font-family: var(--mono);
-        font-size: 17px;
+        font-size: 18px;
         color: var(--green);
         font-weight: 600;
     }
     .reg-val {
         font-family: var(--mono);
-        font-size: 16px;
+        font-size: 17px;
         color: var(--text);
     }
     .reg-desc {
-        font-size: 14px;
+        font-size: 15px;
         color: var(--text-faint);
+    }
+    .reg-panel :global(.hex-val) {
+        font-size: 17px;
     }
     .scrollable::-webkit-scrollbar {
         width: 4px;

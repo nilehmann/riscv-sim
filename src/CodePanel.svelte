@@ -341,7 +341,7 @@
     }
     .code-tab {
         font-family: var(--mono);
-        font-size: 13px;
+        font-size: 14px;
         padding: 7px 16px;
         cursor: pointer;
         border: none;
@@ -368,7 +368,7 @@
     }
     .asm-mode-btn {
         font-family: var(--mono);
-        font-size: 12px;
+        font-size: 13px;
         padding: 3px 12px;
         border: none;
         background: var(--surface2);
@@ -392,7 +392,7 @@
        are also targeted by the imperative $effect highlight logic */
     :global(.line) {
         font-family: var(--mono);
-        font-size: 17px;
+        font-size: 18px;
         line-height: 1.8;
         padding: 0 16px;
         display: flex;
@@ -420,7 +420,7 @@
         width: 16px;
         text-align: center;
         color: var(--blue);
-        font-size: 13px;
+        font-size: 14px;
         user-select: none;
         flex-shrink: 0;
         opacity: 0;
@@ -428,7 +428,7 @@
     }
     :global(.asm-addr) {
         color: var(--text-faint);
-        font-size: 14px;
+        font-size: 15px;
         min-width: 72px;
         margin-right: 6px;
         user-select: none;
@@ -483,7 +483,7 @@
     }
     .c-view {
         font-family: var(--mono);
-        font-size: 15px;
+        font-size: 16px;
         line-height: 1.7;
         padding: 16px;
         color: var(--text);
