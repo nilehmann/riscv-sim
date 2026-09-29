@@ -1,7 +1,9 @@
 <script lang="ts">
     import type { AssemblyResult, SourceInstr } from "./types";
+    import { ALL_REGS } from "./types";
     import { sim, ui } from "./state.svelte";
     import { hx, fmtConcreteRel } from "./assembler";
+    import { garbageValue } from "./simulator";
     import InstrView from "./InstrView.svelte";
     import { _ } from "svelte-i18n";
 
@@ -40,6 +42,65 @@
         });
         return `<span class="kw">${esc(op)}</span> ${parts.join(", ")}`;
     }
+
+    // ─── Garbage instructions (before/after the visible program) ──────────
+    // Deterministic filler rows showing arbitrary code exists at nearby
+    // addresses too — same idea as garbage register/memory defaults.
+
+    const GARBAGE_REGS = ALL_REGS.filter((r) => r !== "zero");
+
+    function greg(h: number, salt: number): string {
+        const idx = Math.abs((h >> (salt * 6)) ^ Math.imul(salt + 1, 0x2545f4)) % GARBAGE_REGS.length;
+        return GARBAGE_REGS[idx]!;
+    }
+    function gimm(h: number): number {
+        return ((h >>> 8) % 2048) - 1024;
+    }
+
+    const GARBAGE_TEMPLATES: Array<(h: number) => string> = [
+        (h) => `addi ${greg(h, 0)}, ${greg(h, 1)}, ${gimm(h)}`,
+        (h) => `lw ${greg(h, 0)}, ${gimm(h) & 0xff}(${greg(h, 1)})`,
+        (h) => `sw ${greg(h, 0)}, ${gimm(h) & 0xff}(${greg(h, 1)})`,
+        (h) => `xor ${greg(h, 0)}, ${greg(h, 1)}, ${greg(h, 2)}`,
+        (h) => `or ${greg(h, 0)}, ${greg(h, 1)}, ${greg(h, 2)}`,
+        (h) => `slli ${greg(h, 0)}, ${greg(h, 1)}, ${Math.abs(h >>> 3) % 32}`,
+    ];
+
+    function garbageInstrHtml(addr: number): string {
+        const h = garbageValue(addr);
+        const t = GARBAGE_TEMPLATES[Math.abs(h) % GARBAGE_TEMPLATES.length]!;
+        return hlConcreteInstr(t(h), {}, addr);
+    }
+
+    interface GarbageRow {
+        addr: number;
+        tier: "near" | "far";
+        html: string;
+    }
+
+    function garbageRows(addrs: number[], nearIsFirst: boolean): GarbageRow[] {
+        return addrs.map((addr, i) => ({
+            addr,
+            tier: (nearIsFirst ? i === 0 : i === addrs.length - 1) ? "near" : "far",
+            html: garbageInstrHtml(addr),
+        }));
+    }
+
+    // Rendered top-to-bottom: farthest first, nearest last (right above real code).
+    const garbageBefore = $derived.by((): GarbageRow[] => {
+        const first = sim.assembled?.sourceInstrs[0]?.firstAddr;
+        if (first == null) return [];
+        return garbageRows([first - 8, first - 4], false);
+    });
+
+    // Rendered top-to-bottom: nearest first (right after real code), farthest last.
+    const garbageAfter = $derived.by((): GarbageRow[] => {
+        const instrs = sim.assembled?.sourceInstrs;
+        if (!instrs || instrs.length === 0) return [];
+        const last = instrs[instrs.length - 1]!;
+        const lastAddr = last.firstAddr + (last.concretes.length - 1) * 4;
+        return garbageRows([lastAddr + 4, lastAddr + 8], true);
+    });
 
     // ─── C syntax highlighter ─────────────────────────────────────────────
 
@@ -251,8 +312,16 @@
             <!-- Assembly lines -->
             {#if sim.assembled}
                 <div id="view-asm">
+                    {#snippet garbageRow(g: GarbageRow)}
+                        <div class="line garbage garbage-{g.tier}" id="al-{g.addr.toString(16)}">
+                            <span class="pc-arrow">▶</span>
+                            <span class="asm-addr">{hx(g.addr)}</span>
+                            <span class="instr-span">  {@html g.html}</span>
+                        </div>
+                    {/snippet}
                     {#if sim.asmMode === "source"}
                         <!-- Source view: one row per source instruction -->
+                        {#each garbageBefore as g}{@render garbageRow(g)}{/each}
                         {#each groups as { label, si }}
                             {#if label !== null}
                                 <div class="line">
@@ -270,8 +339,10 @@
                                 {@html infoIconHtml(tipContent)}
                             </div>
                         {/each}
+                        {#each garbageAfter as g}{@render garbageRow(g)}{/each}
                     {:else}
                         <!-- Assembled view: concrete instructions, pseudo-instructions expanded -->
+                        {#each garbageBefore as g}{@render garbageRow(g)}{/each}
                         {#each groups as { label, si }}
                             {#if label !== null}
                                 {#if groups.indexOf({ label, si }) > 0}
@@ -310,6 +381,7 @@
                                 </div>
                             {/if}
                         {/each}
+                        {#each garbageAfter as g}{@render garbageRow(g)}{/each}
                     {/if}
                 </div>
             {/if}
@@ -480,6 +552,16 @@
     :global(.concrete-group .line) {
         padding-left: 8px;
         padding-right: 8px;
+    }
+    :global(.line.garbage) {
+        pointer-events: none;
+        user-select: none;
+    }
+    :global(.line.garbage-near) {
+        opacity: 0.45;
+    }
+    :global(.line.garbage-far) {
+        opacity: 0.2;
     }
     .c-view {
         font-family: var(--mono);
