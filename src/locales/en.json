@@ -1,7 +1,7 @@
 {
   "controls": {
-    "prev": "← Previous",
-    "next": "Next →",
+    "prev": "Previous",
+    "next": "Next",
     "edit": "Edit"
   },
   "code_panel": {

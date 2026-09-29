@@ -138,14 +138,42 @@
     </div>
 
     <!-- Navigation buttons -->
-    <button class="btn" disabled={sim.posIdx === 0} onclick={() => sim.go(-1)}
-        >{$_('controls.prev')}</button
-    >
+    <button class="btn nav-btn" disabled={sim.posIdx === 0} onclick={() => sim.go(-1)}>
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        <span>{$_('controls.prev')}</span>
+    </button>
     <button
-        class="btn"
+        class="btn nav-btn"
         disabled={sim.posIdx === sim.total - 1}
-        onclick={() => sim.go(1)}>{$_('controls.next')}</button
+        onclick={() => sim.go(1)}
     >
+        <span>{$_('controls.next')}</span>
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+        >
+            <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+    </button>
 </div>
 
 <style>
@@ -237,6 +265,15 @@
         gap: 8px;
     }
     .select-btn svg {
+        flex-shrink: 0;
+        opacity: 0.7;
+    }
+    .nav-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .nav-btn svg {
         flex-shrink: 0;
         opacity: 0.7;
     }

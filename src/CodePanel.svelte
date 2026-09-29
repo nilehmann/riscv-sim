@@ -558,10 +558,10 @@
         user-select: none;
     }
     :global(.line.garbage-near) {
-        opacity: 0.45;
+        opacity: 0.3;
     }
     :global(.line.garbage-far) {
-        opacity: 0.2;
+        opacity: 0.08;
     }
     .c-view {
         font-family: var(--mono);
