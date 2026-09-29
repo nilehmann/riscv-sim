@@ -8,7 +8,7 @@
     "tab_assembly": "Assembly",
     "tab_c": "C",
     "mode_source": "Source",
-    "mode_assembled": "Assembled"
+    "mode_machine": "Machine"
   },
   "register_panel": {
     "title": "Registers"
@@ -101,5 +101,13 @@
     "t4": "temporary",
     "t5": "temporary",
     "t6": "temporary"
+  },
+  "encoding": {
+    "format": "{format}-type",
+    "implicit_zero": "Implicit zero: offsets are multiples of 2",
+    "expanded_from": "expanded from",
+    "show": "Show encoding",
+    "pin_hint": "Click ⓘ to pin",
+    "close": "Close"
   }
 }

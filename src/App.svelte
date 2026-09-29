@@ -211,7 +211,7 @@
     .main {
         flex: 1;
         display: grid;
-        grid-template-columns: 360px 1fr 220px;
+        grid-template-columns: 400px 1fr 220px;
         grid-template-rows: 1fr;
         gap: 0;
         overflow: hidden;

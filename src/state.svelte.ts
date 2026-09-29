@@ -52,6 +52,8 @@ export class UIState {
   vimMode = $state<boolean>(localStorage.getItem("vimMode") === "true");
 }
 
+export type AsmMode = "source" | "machine";
+
 export const ui = new UIState();
 
 // ─── SimulationState ──────────────────────────────────────────────────────
@@ -69,7 +71,7 @@ export class SimulationState {
   slotLabelsByStep = $state<Map<number, string>[]>([]);
   inferError = $state<{ step: number; message: string } | null>(null);
   cur = $state(0);
-  asmMode = $state<"source" | "assembled">("source");
+  asmMode = $state<AsmMode>("source");
   loadError = $state<AppError | null>(null);
 
   // ── Derived navigation ──
@@ -109,7 +111,7 @@ export class SimulationState {
   }
 
   go(dir: number): void {
-    if (this.asmMode === "assembled") {
+    if (this.asmMode !== "source") {
       this.goTo(this.cur + dir);
       return;
     }
@@ -130,7 +132,7 @@ export class SimulationState {
     }
   }
 
-  switchAsmMode(mode: "source" | "assembled"): void {
+  switchAsmMode(mode: AsmMode): void {
     this.asmMode = mode;
     if (mode === "source") {
       // Snap cur down to the nearest source boundary

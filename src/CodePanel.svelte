@@ -1,10 +1,12 @@
 <script lang="ts">
-    import type { AssemblyResult, SourceInstr } from "./types";
+    import type { AssemblyResult, Instr, Reg, SourceInstr } from "./types";
     import { ALL_REGS } from "./types";
     import { sim, ui } from "./state.svelte";
     import { hx, fmtConcreteRel } from "./assembler";
     import { garbageValue } from "./simulator";
+    import { encode, wordBytes } from "./encoder";
     import InstrView from "./InstrView.svelte";
+    import EncodingPopover from "./EncodingPopover.svelte";
     import { _ } from "svelte-i18n";
 
     // ─── HTML escape (used by highlightC and infoIconHtml) ───────────────
@@ -13,7 +15,7 @@
         return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    // ─── Concrete instruction highlighter (assembled view only) ───────────
+    // ─── Concrete instruction highlighter (machine view, garbage rows) ────
     // Used for expanded pseudo-instructions where we only have a formatted
     // string (from fmtConcreteRel), not a SourceInstr.
 
@@ -49,7 +51,7 @@
 
     const GARBAGE_REGS = ALL_REGS.filter((r) => r !== "zero");
 
-    function greg(h: number, salt: number): string {
+    function greg(h: number, salt: number): Reg {
         const idx = Math.abs((h >> (salt * 6)) ^ Math.imul(salt + 1, 0x2545f4)) % GARBAGE_REGS.length;
         return GARBAGE_REGS[idx]!;
     }
@@ -57,33 +59,38 @@
         return ((h >>> 8) % 2048) - 1024;
     }
 
-    const GARBAGE_TEMPLATES: Array<(h: number) => string> = [
-        (h) => `addi ${greg(h, 0)}, ${greg(h, 1)}, ${gimm(h)}`,
-        (h) => `lw ${greg(h, 0)}, ${gimm(h) & 0xff}(${greg(h, 1)})`,
-        (h) => `sw ${greg(h, 0)}, ${gimm(h) & 0xff}(${greg(h, 1)})`,
-        (h) => `xor ${greg(h, 0)}, ${greg(h, 1)}, ${greg(h, 2)}`,
-        (h) => `or ${greg(h, 0)}, ${greg(h, 1)}, ${greg(h, 2)}`,
-        (h) => `slli ${greg(h, 0)}, ${greg(h, 1)}, ${Math.abs(h >>> 3) % 32}`,
-    ];
+    // Immediates are built in range, so the Imm<N> brands hold.
+    const GARBAGE_TEMPLATES = [
+        (h) => ({ op: "addi", rd: greg(h, 0), rs1: greg(h, 1), imm: gimm(h) }),
+        (h) => ({ op: "lw", rd: greg(h, 0), offset: gimm(h) & 0xff, rs1: greg(h, 1) }),
+        (h) => ({ op: "sw", rs2: greg(h, 0), offset: gimm(h) & 0xff, rs1: greg(h, 1) }),
+        (h) => ({ op: "xor", rd: greg(h, 0), rs1: greg(h, 1), rs2: greg(h, 2) }),
+        (h) => ({ op: "or", rd: greg(h, 0), rs1: greg(h, 1), rs2: greg(h, 2) }),
+        (h) => ({ op: "slli", rd: greg(h, 0), rs1: greg(h, 1), imm: Math.abs(h >>> 3) % 32 }),
+    ] as Array<(h: number) => Instr>;
 
-    function garbageInstrHtml(addr: number): string {
+    function garbageInstr(addr: number): Instr {
         const h = garbageValue(addr);
-        const t = GARBAGE_TEMPLATES[Math.abs(h) % GARBAGE_TEMPLATES.length]!;
-        return hlConcreteInstr(t(h), {}, addr);
+        return GARBAGE_TEMPLATES[Math.abs(h) % GARBAGE_TEMPLATES.length]!(h);
     }
 
     interface GarbageRow {
         addr: number;
         tier: "near" | "far";
+        instr: Instr;
         html: string;
     }
 
     function garbageRows(addrs: number[], nearIsFirst: boolean): GarbageRow[] {
-        return addrs.map((addr, i) => ({
-            addr,
-            tier: (nearIsFirst ? i === 0 : i === addrs.length - 1) ? "near" : "far",
-            html: garbageInstrHtml(addr),
-        }));
+        return addrs.map((addr, i) => {
+            const instr = garbageInstr(addr);
+            return {
+                addr,
+                tier: (nearIsFirst ? i === 0 : i === addrs.length - 1) ? "near" : "far",
+                instr,
+                html: hlConcreteInstr(fmtConcreteRel(instr, addr), {}, addr),
+            };
+        });
     }
 
     // Rendered top-to-bottom: farthest first, nearest last (right above real code).
@@ -170,15 +177,17 @@
 
     // ─── Info icon SVG ────────────────────────────────────────────────────
 
+    const INFO_SVG =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" ` +
+        `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
+        `<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line>` +
+        `<line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+
     function infoIconHtml(tooltip: string): string {
-        return `<span class="instr-info" data-tooltip="${esc(tooltip)}">` +
-            `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" ` +
-            `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` +
-            `<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line>` +
-            `<line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span>`;
+        return `<span class="instr-info" data-tooltip="${esc(tooltip)}">${INFO_SVG}</span>`;
     }
 
-    // ─── Assembled view line groups (computed from assembled) ─────────────
+    // ─── Line groups: label headers + source instrs (computed from assembled)
 
     interface SourceGroup {
         label: string | null;  // label to show before this group, if changed
@@ -273,7 +282,92 @@
     const cHtml = $derived(
         sim.program?.cCode ? highlightC(sim.program.cCode) : "",
     );
+
+    // ─── Machine view: bytes per row, encoding popover on hover/click ─────
+
+    function hexBytes(instr: Instr): string[] {
+        return wordBytes(encode(instr)).map((b) =>
+            b.toString(16).toUpperCase().padStart(2, "0"),
+        );
+    }
+
+    // Real instructions by address, with the source line each came from
+    // (garbage rows are not hoverable).
+    const machineInstrs = $derived.by(() => {
+        const m = new Map<number, { instr: Instr; si: SourceInstr }>();
+        for (const si of sim.assembled?.sourceInstrs ?? [])
+            si.concretes.forEach((instr, i) => m.set(si.firstAddr + i * 4, { instr, si }));
+        return m;
+    });
+
+    // Encoding popover. Hovering the info icon opens it, and it stays open while
+    // the pointer is on the icon or the popover (a short delay lets it cross the
+    // gap). Clicking the icon pins it until unpinned, clicked outside, or Esc.
+    let hoverAddr = $state<number | null>(null);
+    let pinnedAddr = $state<number | null>(null);
+    const popAddr = $derived(pinnedAddr ?? hoverAddr);
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+
+    function showEncoding(addr: number) {
+        clearTimeout(hideTimer);
+        hoverAddr = addr;
+    }
+    function keepEncoding() {
+        clearTimeout(hideTimer);
+    }
+    function hideEncodingSoon() {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => (hoverAddr = null), 150);
+    }
+    function togglePin(addr: number) {
+        pinnedAddr = pinnedAddr === addr ? null : addr;
+    }
+
+    function onWindowPointerDown(e: PointerEvent) {
+        if (pinnedAddr == null) return;
+        // Info icons handle their own clicks; the popover itself is interactive.
+        if ((e.target as Element | null)?.closest(".mc-info, .enc-popover")) return;
+        pinnedAddr = null;
+    }
+    function onWindowKeyDown(e: KeyboardEvent) {
+        if (e.key === "Escape") pinnedAddr = null;
+    }
+
+    // Rows are replaced on mode switch or program load without a mouseleave.
+    $effect(() => {
+        sim.asmMode;
+        sim.assembled;
+        clearTimeout(hideTimer);
+        hoverAddr = null;
+        pinnedAddr = null;
+    });
+
+    const popEntry = $derived(popAddr != null ? (machineInstrs.get(popAddr) ?? null) : null);
+
+    // A source line is a pseudo-instruction if it expanded to something else.
+    function isPseudo(si: SourceInstr): boolean {
+        return si.concretes.length > 1 || si.concretes[0]!.op !== si.parsed.op;
+    }
+
+    // Bumped on scroll/resize so the popover follows its row.
+    let layoutTick = $state(0);
+    const popAnchor = $derived.by(() => {
+        layoutTick;
+        if (popAddr == null) return null;
+        const row = document.getElementById("al-" + popAddr.toString(16));
+        if (!row) return null;
+        // Rows can be wider than the panel when it scrolls horizontally.
+        const panelRight = row.closest(".code-scroll")!.getBoundingClientRect().right;
+        const r = row.getBoundingClientRect();
+        return { x: Math.min(r.right, panelRight), y: r.top };
+    });
 </script>
+
+<svelte:window
+    onresize={() => layoutTick++}
+    onpointerdown={onWindowPointerDown}
+    onkeydown={onWindowKeyDown}
+/>
 
 <!-- LEFT: Assembly / C panel -->
 <div class="code-panel">
@@ -294,7 +388,7 @@
 
     <!-- Assembly pane -->
     {#if ui.activeTab === "asm"}
-        <div class="code-scroll scrollable">
+        <div class="code-scroll scrollable" onscroll={() => layoutTick++}>
             <!-- Mode bar -->
             <div class="asm-mode-bar">
                 <button
@@ -304,9 +398,9 @@
                 >{$_('code_panel.mode_source')}</button>
                 <button
                     class="asm-mode-btn"
-                    class:active={sim.asmMode === "assembled"}
-                    onclick={() => sim.switchAsmMode("assembled")}
-                >{$_('code_panel.mode_assembled')}</button>
+                    class:active={sim.asmMode === "machine"}
+                    onclick={() => sim.switchAsmMode("machine")}
+                >{$_('code_panel.mode_machine')}</button>
             </div>
 
             <!-- Assembly lines -->
@@ -316,7 +410,35 @@
                         <div class="line garbage garbage-{g.tier}" id="al-{g.addr.toString(16)}">
                             <span class="pc-arrow">▶</span>
                             <span class="asm-addr">{hx(g.addr)}</span>
-                            <span class="instr-span">  {@html g.html}</span>
+                            <span class="instr-span">{@html g.html}</span>
+                        </div>
+                    {/snippet}
+                    {#snippet machineRow(addr: number, instr: Instr, extraClass: string)}
+                        <div
+                            class="line machine-row {extraClass}"
+                            class:enc-open={popAddr === addr}
+                            class:enc-pinned={pinnedAddr === addr}
+                            id="al-{addr.toString(16)}"
+                        >
+                            <span class="pc-arrow">▶</span>
+                            <span class="asm-addr">{hx(addr)}</span>
+                            <span class="instr-span mc-bytes">
+                                {#each hexBytes(instr) as b}<span>{b}</span>{/each}
+                            </span>
+                            <span class="mc-instr">{@html hlConcreteInstr(fmtConcreteRel(instr, addr), sim.assembled?.labels ?? {}, addr)}</span>
+                            {#if !extraClass.includes("garbage")}
+                                <!-- Hover (or focus) shows the encoding popover, click pins it -->
+                                <button
+                                    class="mc-info"
+                                    aria-label={$_("encoding.show")}
+                                    aria-pressed={pinnedAddr === addr}
+                                    onclick={() => togglePin(addr)}
+                                    onmouseenter={() => showEncoding(addr)}
+                                    onmouseleave={hideEncodingSoon}
+                                    onfocus={() => showEncoding(addr)}
+                                    onblur={hideEncodingSoon}
+                                >{@html INFO_SVG}</button>
+                            {/if}
                         </div>
                     {/snippet}
                     {#if sim.asmMode === "source"}
@@ -335,53 +457,32 @@
                             <div class="line" id="al-{si.firstAddr.toString(16)}">
                                 <span class="pc-arrow">▶</span>
                                 <span class="asm-addr">{hx(si.firstAddr)}</span>
-                                <span class="instr-span">  <InstrView {si} labels={sim.assembled!.labels} /></span>
+                                <span class="instr-span"><InstrView {si} labels={sim.assembled!.labels} /></span>
                                 {@html infoIconHtml(tipContent)}
                             </div>
                         {/each}
                         {#each garbageAfter as g}{@render garbageRow(g)}{/each}
                     {:else}
-                        <!-- Assembled view: concrete instructions, pseudo-instructions expanded -->
-                        {#each garbageBefore as g}{@render garbageRow(g)}{/each}
+                        <!-- Machine view: little-endian bytes of each concrete instruction -->
+                        {#each garbageBefore as g}{@render machineRow(g.addr, g.instr, `garbage garbage-${g.tier}`)}{/each}
                         {#each groups as { label, si }}
                             {#if label !== null}
-                                {#if groups.indexOf({ label, si }) > 0}
-                                    <div class="line">
-                                        <span class="asm-addr"></span>
-                                        &nbsp;
-                                    </div>
-                                {/if}
                                 <div class="line">
                                     <span class="asm-addr"></span>
                                     <span class="lbl">{label}:</span>
                                 </div>
                             {/if}
                             {#if si.concretes.length === 1}
-                                {@const c = si.concretes[0]!}
-                                {@const ciAddr = si.firstAddr}
-                                {@const instrHtml = hlConcreteInstr(fmtConcreteRel(c, ciAddr), sim.assembled!.labels, ciAddr)}
-                                <div class="line" id="al-{ciAddr.toString(16)}">
-                                    <span class="pc-arrow">▶</span>
-                                    <span class="asm-addr">{hx(ciAddr)}</span>
-                                    <span class="instr-span">  {@html instrHtml}</span>
-                                    {@html infoIconHtml(si.raw)}
-                                </div>
+                                {@render machineRow(si.firstAddr, si.concretes[0]!, "")}
                             {:else}
                                 <div class="concrete-group">
                                     {#each si.concretes as c, i}
-                                        {@const ciAddr = si.firstAddr + i * 4}
-                                        {@const instrHtml = hlConcreteInstr(fmtConcreteRel(c, ciAddr), sim.assembled!.labels, ciAddr)}
-                                        <div class="line" id="al-{ciAddr.toString(16)}">
-                                            <span class="pc-arrow">▶</span>
-                                            <span class="asm-addr">{hx(ciAddr)}</span>
-                                            <span class="instr-span">  {@html instrHtml}</span>
-                                        </div>
+                                        {@render machineRow(si.firstAddr + i * 4, c, "")}
                                     {/each}
-                                    {@html infoIconHtml(si.raw)}
                                 </div>
                             {/if}
                         {/each}
-                        {#each garbageAfter as g}{@render garbageRow(g)}{/each}
+                        {#each garbageAfter as g}{@render machineRow(g.addr, g.instr, `garbage garbage-${g.tier}`)}{/each}
                     {/if}
                 </div>
             {/if}
@@ -394,6 +495,21 @@
     {/if}
 </div>
 
+{#if sim.asmMode === "machine" && popAddr != null && popEntry && popAnchor}
+    <EncodingPopover
+        instr={popEntry.instr}
+        addr={popAddr}
+        instrHtml={hlConcreteInstr(fmtConcreteRel(popEntry.instr, popAddr), {}, popAddr)}
+        pseudo={isPseudo(popEntry.si) ? popEntry.si : null}
+        labels={sim.assembled?.labels ?? {}}
+        anchor={popAnchor}
+        pinned={pinnedAddr != null}
+        onenter={keepEncoding}
+        onleave={hideEncodingSoon}
+        onclose={() => (pinnedAddr = null)}
+    />
+{/if}
+
 <style>
     .code-panel {
         border-right: 1px solid var(--border);
@@ -403,7 +519,13 @@
     }
     .code-scroll {
         flex: 1;
-        overflow-y: auto;
+        overflow: auto;
+    }
+    /* Rows share the width of the longest one, so long lines scroll
+       horizontally together and highlights span the full row. */
+    #view-asm {
+        width: max-content;
+        min-width: 100%;
     }
     .code-tabs {
         display: flex;
@@ -431,6 +553,8 @@
         cursor: default;
     }
     .asm-mode-bar {
+        position: sticky;
+        left: 0;
         display: flex;
         align-items: center;
         padding: 7px 12px;
@@ -466,7 +590,7 @@
         font-family: var(--mono);
         font-size: 18px;
         line-height: 1.8;
-        padding: 0 16px;
+        padding: 0 8px;
         display: flex;
         align-items: center;
         white-space: pre;
@@ -500,10 +624,13 @@
     }
     :global(.asm-addr) {
         color: var(--text-faint);
-        font-size: 15px;
+        font-size: 14px;
         min-width: 72px;
         margin-right: 6px;
         user-select: none;
+    }
+    :global(.instr-span) {
+        margin-left: 4px;
     }
     :global(.lbl) {
         color: var(--blue);
@@ -541,21 +668,73 @@
     :global(.concrete-group) {
         border: 1px solid var(--border);
         border-radius: 6px;
-        overflow: hidden;
-        margin: 2px 8px;
+        /* clip, not hidden: hidden makes this a scroll container, which would
+           stop the sticky info icons inside it from sticking to the panel. */
+        overflow: clip;
+        margin: 2px 4px;
         position: relative;
     }
     :global(.concrete-group > .instr-info) {
         top: 6px;
         transform: none;
     }
+    /* 4px margin + 1px border + 3px padding lines up with the 8px row padding */
     :global(.concrete-group .line) {
-        padding-left: 8px;
-        padding-right: 8px;
+        padding-left: 3px;
+        padding-right: 3px;
     }
     :global(.line.garbage) {
         pointer-events: none;
         user-select: none;
+    }
+    :global(.line.machine-row) {
+        /* children use smaller fonts; keep the same row height as other modes */
+        min-height: 1.8em;
+    }
+    .mc-bytes {
+        display: flex;
+        gap: 4px;
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+    .mc-instr {
+        font-size: 14px;
+        margin-left: 12px;
+        flex-shrink: 0;
+    }
+    /* margin-left: auto pushes it to the row's right edge; sticky keeps it at
+       the panel's visible edge when the row overflows, with the text scrolling
+       under a short fade. */
+    .mc-info {
+        margin-left: auto;
+        position: sticky;
+        right: 0;
+        padding: 0 0 0 12px;
+        display: flex;
+        align-items: center;
+        /* Opaque base plus the row's own tint, so it blends with highlighted rows */
+        background:
+            linear-gradient(to right, transparent, var(--row-tint, transparent) 10px),
+            linear-gradient(to right, transparent, var(--bg) 10px);
+        border: none;
+        color: var(--text-faint);
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.15s;
+    }
+    :global(.line.machine-row:hover) .mc-info,
+    :global(.line.machine-row.enc-open) .mc-info {
+        opacity: 1;
+    }
+    .mc-info:hover {
+        color: var(--text-dim);
+    }
+    :global(.line.machine-row.enc-pinned) .mc-info {
+        color: var(--blue);
+    }
+    :global(.line.machine-row.enc-open) {
+        --row-tint: var(--blue-dim);
+        background: var(--row-tint);
     }
     :global(.line.garbage-near) {
         opacity: 0.3;
@@ -571,7 +750,7 @@
         color: var(--text);
         white-space: pre-wrap;
     }
-    .scrollable::-webkit-scrollbar { width: 4px; }
+    .scrollable::-webkit-scrollbar { width: 4px; height: 4px; }
     .scrollable::-webkit-scrollbar-track { background: transparent; }
     .scrollable::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 </style>

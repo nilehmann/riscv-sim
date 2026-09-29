@@ -8,7 +8,7 @@
     "tab_assembly": "Assembly",
     "tab_c": "C",
     "mode_source": "Fuente",
-    "mode_assembled": "Ensamblado"
+    "mode_machine": "Máquina"
   },
   "register_panel": {
     "title": "Registros"
@@ -101,5 +101,13 @@
     "t4": "temporal",
     "t5": "temporal",
     "t6": "temporal"
+  },
+  "encoding": {
+    "format": "tipo {format}",
+    "implicit_zero": "Cero implícito: los desplazamientos son múltiplos de 2",
+    "expanded_from": "expandido de",
+    "show": "Mostrar codificación",
+    "pin_hint": "Clic en ⓘ para fijar",
+    "close": "Cerrar"
   }
 }
