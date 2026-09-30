@@ -7,28 +7,23 @@
     import { oneDark } from "@codemirror/theme-one-dark";
     import { vim } from "@replit/codemirror-vim";
     import type { Program, MemoryRegion } from "./types";
-    import { ALL_REGS, isReg } from "./types";
     import { checkElementFit } from "./validation";
     import { sim, ui } from "./state.svelte";
     import { get } from "svelte/store";
     import { _ } from "svelte-i18n";
 
-    // ── RISC-V language mode ──────────────────────────────────────────────────
+    // ── Assembly language mode (keywords come from the program's ISA) ─────────
 
-    const REGISTERS = new Set<string>(ALL_REGS);
-    const MNEMONICS = new Set([
-        "add", "addi", "sub", "mul", "div", "rem",
-        "and", "andi", "or", "ori", "xor", "xori",
-        "sll", "slli", "srl", "srli", "sra", "srai",
-        "lui", "auipc", "jal", "jalr", "ret", "nop",
-        "beq", "bne", "blt", "bge", "bltu", "bgeu",
-        "beqz", "bnez", "bltz", "bgez", "bgtz", "blez",
-        "bgt", "ble", "bgtu", "bleu",
-        "lw", "lh", "lb", "lhu", "lbu", "sw", "sh", "sb",
-        "mv", "neg", "li", "la", "call", "tail", "j", "jr",
-    ]);
+    const isa = sim.isa;
+    const REGISTERS = new Set<string>([...isa.regs.names, ...Object.keys(isa.regs.aliases)]);
+    const MNEMONICS = isa.editor.mnemonics;
+    const isReg = (r: string) => isa.regs.names.includes(r);
+    const ALL_REGS = isa.regs.names;
+    const SP = isa.regs.sp;
+    const ZERO = isa.regs.zero;
+    const RA = isa.regs.returnAddr;
 
-    const riscvLang = StreamLanguage.define({
+    const asmLang = StreamLanguage.define({
         token(stream) {
             if (stream.eatSpace()) return null;
             if (stream.match(/^#.*/) || stream.match(/^\/\/.*/)) return "comment";
@@ -46,7 +41,7 @@
         },
     });
 
-    const riscvHighlight = HighlightStyle.define([
+    const asmHighlight = HighlightStyle.define([
         { tag: tags.lineComment,                 color: "var(--text-faint)", fontStyle: "italic" },
         { tag: tags.number,                      color: "var(--blue)" },
         { tag: tags.keyword,                     color: "var(--purple)" },
@@ -97,17 +92,18 @@
         Object.entries(
             (() => {
                 const ir = sim.program?.initialRegs;
-                const defaults: Record<string, number> = { sp: DEFAULT_SP, ra: 0x8050 };
-                if (!ir) return sim.program?.showStack ? { ra: 0x8050 } : defaults;
+                const raDefault: Record<string, number> = RA ? { [RA]: 0x8050 } : {};
+                const defaults: Record<string, number> = { [SP]: DEFAULT_SP, ...raDefault };
+                if (!ir) return sim.program?.showStack ? raDefault : defaults;
                 return sim.program.showStack
-                    ? Object.fromEntries(Object.entries(ir).filter(([k]) => k !== "sp"))
+                    ? Object.fromEntries(Object.entries(ir).filter(([k]) => k !== SP))
                     : ir;
             })()
         ).map(([reg, val]) => ({ reg, val: "0x" + (val as number).toString(16) }))
     );
     let showStack = $state(sim.program?.showStack ?? false);
     let stackBase = $state("0x" + (sim.program?.stackBase ?? DEFAULT_STACK_BASE).toString(16));
-    let stackSp   = $state("0x" + (sim.program?.initialRegs?.sp ?? DEFAULT_SP).toString(16));
+    let stackSp   = $state("0x" + (sim.program?.initialRegs?.[SP] ?? DEFAULT_SP).toString(16));
 
     type RegionRow = { addr: string; elementSize: 1 | 2 | 4; elements: string[] };
     let scrollEls: (HTMLElement | null)[] = [];
@@ -127,7 +123,7 @@
         const errors = new Set<number>();
         for (let i = 0; i < regs.length; i++) {
             const reg = regs[i]!.reg.trim();
-            if (!isReg(reg) || reg === "zero" || (showStack && reg === "sp")) {
+            if (!isReg(reg) || reg === ZERO || (showStack && reg === SP)) {
                 errors.add(i);
             } else if (seen.has(reg)) {
                 errors.add(i);
@@ -145,8 +141,8 @@
             doc: untrack(() => assembly),
             extensions: [
                 basicSetup,
-                riscvLang,
-                syntaxHighlighting(riscvHighlight),
+                asmLang,
+                syntaxHighlighting(asmHighlight),
                 structuralTheme,
                 themeCompartment.of(isDark() ? oneDark : []),
                 vimCompartment.of(untrack(() => ui.vimMode) ? vim() : []),
@@ -181,7 +177,7 @@
 
     function addReg() {
         const used = new Set(regs.map((r) => r.reg));
-        const forbidden = new Set(["zero", ...(showStack ? ["sp"] : [])]);
+        const forbidden = new Set([ZERO, ...(showStack ? [SP] : [])]);
         const next = ALL_REGS.find((r) => !used.has(r) && !forbidden.has(r)) ?? ALL_REGS[0]!;
         regs = [...regs, { reg: next, val: "0x0" }];
     }
@@ -243,7 +239,7 @@
             if (isNaN(parsedStackBase)) { loadError = get(_)("editor.err_stack_base"); return; }
             const parsedStackSp = parseInt(stackSp);
             if (isNaN(parsedStackSp)) { loadError = get(_)("editor.err_stack_pointer"); return; }
-            initialRegs["sp"] = parsedStackSp;
+            initialRegs[SP] = parsedStackSp;
         }
         const memoryRegions: MemoryRegion[] = [];
         for (let ri = 0; ri < regions.length; ri++) {
@@ -260,7 +256,7 @@
             }
             memoryRegions.push({ addr, elementSize: r.elementSize, elements });
         }
-        const prog: Program = { name, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase, memoryRegions };
+        const prog: Program = { name, isa: isa.id, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase, memoryRegions };
         sim.loadProgram(prog);
         if (sim.loadError) {
             loadError = sim.loadError.message + (sim.loadError.detail ? `\n${sim.loadError.detail}` : "");
@@ -306,7 +302,7 @@
             <div class="field">
                 <label class="field-label">{$_('editor.initial_registers')}</label>
                 <datalist id="regs-list-dl">
-                    {#each ALL_REGS.filter(r => r !== "zero" && !(showStack && r === "sp")) as r}<option value={r}></option>{/each}
+                    {#each ALL_REGS.filter(r => r !== ZERO && !(showStack && r === SP)) as r}<option value={r}></option>{/each}
                 </datalist>
                 <div class="regs-list">
                     {#each regs as row, i}

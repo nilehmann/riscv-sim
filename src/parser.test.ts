@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { parseInstr } from "./parser";
+import { parseInstr } from "./isa/rv32/parser";
 import { assembleProgram } from "./assembler";
 import { simulate } from "./simulator";
 import { AppError } from "./types";
@@ -235,27 +235,27 @@ describe("branch pseudo-ops semantics", () => {
   `;
 
   test("beqz takes branch when reg == 0", () =>
-    expect(run(prog("beqz zero"), {}).a0).toBe(2));
+    expect(run(prog("beqz zero"), {}).a0).toBe(2n));
   test("bnez does not take branch when reg == 0", () =>
-    expect(run(prog("bnez zero"), {}).a0).toBe(1));
+    expect(run(prog("bnez zero"), {}).a0).toBe(1n));
   test("bltz takes branch when reg < 0", () =>
-    expect(run(prog("bltz a1"), { a1: -1 }).a0).toBe(2));
+    expect(run(prog("bltz a1"), { a1: -1 }).a0).toBe(2n));
   test("bgez does not take branch when reg < 0", () =>
-    expect(run(prog("bgez a1"), { a1: -1 }).a0).toBe(1));
+    expect(run(prog("bgez a1"), { a1: -1 }).a0).toBe(1n));
   test("bgtz takes branch when reg > 0", () =>
-    expect(run(prog("bgtz a1"), { a1: 5 }).a0).toBe(2));
+    expect(run(prog("bgtz a1"), { a1: 5 }).a0).toBe(2n));
   test("blez takes branch when reg == 0", () =>
-    expect(run(prog("blez a1"), { a1: 0 }).a0).toBe(2));
+    expect(run(prog("blez a1"), { a1: 0 }).a0).toBe(2n));
   test("bgt takes branch when rs1 > rs2", () =>
-    expect(run(prog("bgt a1, a2"), { a1: 5, a2: 3 }).a0).toBe(2));
+    expect(run(prog("bgt a1, a2"), { a1: 5, a2: 3 }).a0).toBe(2n));
   test("bgt does not take branch when rs1 == rs2", () =>
-    expect(run(prog("bgt a1, a2"), { a1: 3, a2: 3 }).a0).toBe(1));
+    expect(run(prog("bgt a1, a2"), { a1: 3, a2: 3 }).a0).toBe(1n));
   test("ble takes branch when rs1 <= rs2", () =>
-    expect(run(prog("ble a1, a2"), { a1: 3, a2: 3 }).a0).toBe(2));
+    expect(run(prog("ble a1, a2"), { a1: 3, a2: 3 }).a0).toBe(2n));
   test("bgtu treats operands as unsigned", () =>
-    expect(run(prog("bgtu a1, a2"), { a1: -1, a2: 1 }).a0).toBe(2));
+    expect(run(prog("bgtu a1, a2"), { a1: -1, a2: 1 }).a0).toBe(2n));
   test("bleu treats operands as unsigned", () =>
-    expect(run(prog("bleu a1, a2"), { a1: 1, a2: -1 }).a0).toBe(2));
+    expect(run(prog("bleu a1, a2"), { a1: 1, a2: -1 }).a0).toBe(2n));
 });
 
 // ─── Unknown / empty ──────────────────────────────────────────────────────────
@@ -317,7 +317,7 @@ describe("label placement", () => {
     const { steps } = simulate(prog, asm(prog.assembly));
     expect(steps).toHaveLength(2); // initial state + the jump
     expect(steps[1]!.nextAddr).toBe(0x8000 + 8);
-    expect(steps[1]!.regs.a0).not.toBe(1);
+    expect(steps[1]!.regs.a0).not.toBe(1n);
   });
 
   test("consecutive labels all point to the next instruction", () => {

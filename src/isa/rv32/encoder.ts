@@ -1,4 +1,5 @@
 import type { Instr, Reg } from "./types";
+import type { BitField, Encoding, ImmPart } from "../types";
 
 // ─── Register numbers ─────────────────────────────────────────────────────
 // ALL_REGS is ordered for display, not by ABI number, so map explicitly.
@@ -12,35 +13,7 @@ const REG_NUM: Record<Reg, number> = {
 // ─── Encoding layout ──────────────────────────────────────────────────────
 
 export type Format = "R" | "I" | "S" | "B" | "U" | "J";
-export type FieldKind = "opcode" | "funct" | "reg" | "imm";
-
-export interface Field {
-  /** e.g. "rd", "funct3", "imm[11:5]" */
-  name: string;
-  /** Bit range in the instruction word (inclusive, hi >= lo). */
-  hi: number;
-  lo: number;
-  /** Field value, already truncated to hi-lo+1 bits. */
-  value: number;
-  kind: FieldKind;
-  /** Human meaning of the value, e.g. "STORE", "sw", "x2 (sp)". */
-  note: string;
-}
-
-export interface ImmPart {
-  /** Field name this part comes from, or null for implicit zero bits. */
-  field: string | null;
-  bits: string;
-}
-
-export interface Encoding {
-  word: number;
-  format: Format;
-  /** Fields ordered from bit 31 down to bit 0, covering all 32 bits. */
-  fields: Field[];
-  /** How the immediate is reassembled from its fields, high to low. */
-  imm: { parts: ImmPart[]; value: number } | null;
-}
+type Field = BitField;
 
 /** Extracts bits [hi:lo] of v. */
 function bits(v: number, hi: number, lo: number): number {
@@ -176,7 +149,7 @@ const IMM_SHAPE: Partial<Record<Format, { top: number; implicitZeros: number }>>
   J: { top: 20, implicitZeros: 1 },
 };
 
-export function encodeDetailed(c: Instr): Encoding {
+export function encode(c: Instr): Encoding {
   const { format, fields, immValue } = layout(c);
   let word = 0;
   for (const f of fields) word |= f.value << f.lo;
@@ -201,14 +174,12 @@ export function encodeDetailed(c: Instr): Encoding {
     imm = { parts, value: immValue };
   }
 
-  return { word: word >>> 0, format, fields, imm };
-}
-
-export function encode(c: Instr): number {
-  return encodeDetailed(c).word;
-}
-
-/** Little-endian bytes of an instruction word: [addr+0, addr+1, addr+2, addr+3]. */
-export function wordBytes(word: number): number[] {
-  return [0, 8, 16, 24].map((s) => (word >>> s) & 0xff);
+  // Little-endian: bytes[k] is the byte at addr + k.
+  const bytes = [0, 8, 16, 24].map((s) => (word >>> s) & 0xff);
+  return {
+    bytes,
+    format,
+    parts: [{ name: "instruction", offset: 0, length: 4, fields }],
+    imm,
+  };
 }

@@ -1,4 +1,5 @@
 import type { AssemblyResult, FrameInfo, Program, Step } from "./types";
+import type { Isa } from "./isa/types";
 
 export interface DisplayState {
   callFramesByStep: FrameInfo[][];
@@ -10,11 +11,14 @@ export function inferDisplayState(
   steps: Step[],
   assembled: AssemblyResult,
   prog: Program,
+  isa: Isa,
+  initialReturnAddr: number | null,
 ): DisplayState {
   if (steps.length === 0 || prog.showStack === false)
     return { callFramesByStep: [], slotLabelsByStep: [], error: null };
 
-  const { sourceInstrs, addrToSourceIdx, labels } = assembled;
+  const { labels } = assembled;
+  const sp = (step: Step) => Number(step.regs[isa.regs.sp]);
 
   const nonLocalLabelAddrs = new Map<number, string>();
   for (const [name, addr] of Object.entries(labels)) {
@@ -26,9 +30,9 @@ export function inferDisplayState(
   const callStack: FrameInfo[] = [
     {
       label: prog.entryPoint ?? "(start)",
-      entrySpBefore: steps[0]!.regs.sp,
+      entrySpBefore: sp(steps[0]!),
       allocatedSize: 0,
-      returnAddr: steps[0]!.regs.ra,
+      returnAddr: initialReturnAddr ?? NaN,
     },
   ];
   const slotLabels = new Map<number, string>();
@@ -49,68 +53,58 @@ export function inferDisplayState(
 
     if (step.store) slotLabels.set(step.store.addr, step.store.reg);
 
-    // lightweight jump check — guard against branches landing on label addresses
-    let isJump = false;
-    const instrAddr = step.aHl[0];
-    if (instrAddr != null) {
-      const siIdx = addrToSourceIdx.get(instrAddr);
-      if (siIdx != null) {
-        const si = sourceInstrs[siIdx]!;
-        const ci = si.concretes[(instrAddr - si.firstAddr) / 4];
-        if (ci) isJump = ci.op === "jal" || ci.op === "jalr";
-      }
-    }
-
-    const raChanged = step.regs.ra !== prevStep.regs.ra;
+    const control = step.control;
     const topFrame = callStack[callStack.length - 1]!;
 
-    if (raChanged && isJump && step.nextAddr != null) {
-      // Regular call
+    if (control?.kind === "call" && step.nextAddr != null) {
+      // Regular call. The frame starts at sp after the call, so a return
+      // address pushed by the call belongs to the caller's frame.
       callStack.push({
         label: nonLocalLabelAddrs.get(step.nextAddr) ?? "??",
-        entrySpBefore: step.regs.sp,
+        entrySpBefore: sp(step),
         allocatedSize: 0,
-        returnAddr: step.regs.ra,
+        returnAddr: control.returnAddr,
       });
     } else if (step.nextAddr === topFrame.returnAddr && callStack.length > 1) {
       // Return
+      // Compare sp before the returning instruction: a `ret` that pops the
+      // return address moves sp past the frame base.
       const popped = callStack.pop()!;
-      if (step.regs.sp !== popped.entrySpBefore) {
+      if (sp(prevStep) !== popped.entrySpBefore) {
         error = {
           step: i,
-          message: `sp not restored before return in "${popped.label}" (expected 0x${popped.entrySpBefore.toString(16)}, got 0x${step.regs.sp.toString(16)})`,
+          message: `${isa.regs.sp} not restored before return in "${popped.label}" (expected 0x${popped.entrySpBefore.toString(16)}, got 0x${sp(prevStep).toString(16)})`,
         };
       }
     } else if (
-      isJump &&
-      !raChanged &&
+      control?.kind === "jump" &&
       step.nextAddr != null &&
       nonLocalLabelAddrs.has(step.nextAddr) &&
       nonLocalLabelAddrs.get(step.nextAddr) !== topFrame.label
     ) {
       // Tail call — replace top frame, inherit returnAddr
       const popped = callStack.pop()!;
-      if (step.regs.sp !== popped.entrySpBefore) {
+      if (sp(prevStep) !== popped.entrySpBefore) {
         error = {
           step: i,
-          message: `sp not restored before tail call from "${popped.label}" (expected 0x${popped.entrySpBefore.toString(16)}, got 0x${step.regs.sp.toString(16)})`,
+          message: `${isa.regs.sp} not restored before tail call from "${popped.label}" (expected 0x${popped.entrySpBefore.toString(16)}, got 0x${sp(prevStep).toString(16)})`,
         };
       }
       callStack.push({
         label: nonLocalLabelAddrs.get(step.nextAddr)!,
-        entrySpBefore: step.regs.sp,
+        entrySpBefore: sp(step),
         allocatedSize: 0,
         returnAddr: popped.returnAddr,
       });
     }
 
     const newTop = callStack[callStack.length - 1]!;
-    newTop.allocatedSize = newTop.entrySpBefore - step.regs.sp;
+    newTop.allocatedSize = newTop.entrySpBefore - sp(step);
 
-    if (!error && step.regs.sp > newTop.entrySpBefore) {
+    if (!error && sp(step) > newTop.entrySpBefore) {
       error = {
         step: i,
-        message: `sp above frame base in "${newTop.label}" (sp=0x${step.regs.sp.toString(16)}, base=0x${newTop.entrySpBefore.toString(16)})`,
+        message: `${isa.regs.sp} above frame base in "${newTop.label}" (${isa.regs.sp}=0x${sp(step).toString(16)}, base=0x${newTop.entrySpBefore.toString(16)})`,
       };
     }
 

@@ -1,8 +1,11 @@
 import type { AssemblyResult, DisplayReg, FrameInfo, Program, Step } from "./types";
+import type { Isa } from "./isa/types";
 import { AppError, hx } from "./types";
+import { getIsa } from "./isa";
 import { assembleProgram } from "./assembler";
 import { validateProgram, validateAssembled } from "./validation";
-import { ALL_REGS, REG_META, garbageValue, simulate } from "./simulator";
+import { simulate } from "./simulator";
+import { garbageReg } from "./garbage";
 import { inferDisplayState } from "./inferDisplay";
 import { PROGRAMS } from "./programs";
 
@@ -11,24 +14,15 @@ import { PROGRAMS } from "./programs";
 function computeDisplayRegs(
   prog: Program,
   assembled: AssemblyResult,
+  isa: Isa,
 ): DisplayReg[] {
-  const { sourceInstrs } = assembled;
   const used = new Set<string>();
-  for (const r of Object.keys(prog.initialRegs)) used.add(r);
-  for (const si of sourceInstrs) {
-    for (const c of si.concretes) {
-      for (const field of ["rd", "rs1", "rs2"] as const) {
-        const val = (c as Record<string, unknown>)[field];
-        if (typeof val === "string" && REG_META[val as keyof typeof REG_META])
-          used.add(val);
-      }
-    }
-  }
-  return ALL_REGS.filter((r) => used.has(r)).map((r) => ({
-    name: r,
-    desc: REG_META[r as keyof typeof REG_META]?.desc ?? "",
-    key: r,
-  }));
+  for (const r of Object.keys(prog.initialRegs)) used.add(isa.regs.aliases[r] ?? r);
+  for (const si of assembled.sourceInstrs)
+    for (const c of si.concretes) for (const r of isa.regsUsed(c.instr)) used.add(r);
+  return isa.regs.names
+    .filter((r) => used.has(r))
+    .map((r) => ({ name: r, desc: "", key: r }));
 }
 
 // ─── UIState ─────────────────────────────────────────────────────────────
@@ -62,6 +56,7 @@ export const ui = new UIState();
 export class SimulationState {
   // ── Core state ──
   program = $state<Program | null>(null);
+  isa = $state<Isa>(getIsa());
   assembled = $state<AssemblyResult | null>(null);
   steps = $state<Step[]>([]);
   /** Concrete step index of the last concrete instr for source[i]. sourcePositions[0]=0, then sourceToConcrete values. */
@@ -143,29 +138,33 @@ export class SimulationState {
   loadProgram(prog: Program): void {
     this.loadError = null;
 
-    this.loadError = validateProgram(prog);
+    const isa = getIsa(prog.isa);
+    this.loadError = validateProgram(prog, isa);
     if (this.loadError) return;
 
-    const assembled = assembleProgram(prog);
+    const assembled = assembleProgram(prog, isa);
     if (assembled instanceof AppError) {
       this.loadError = assembled;
       return;
     }
 
-    this.loadError = validateAssembled(prog, assembled);
+    this.loadError = validateAssembled(prog, assembled, isa);
     if (this.loadError) return;
 
-    const { steps, sourceToConcrete } = simulate(prog, assembled);
-    const { callFramesByStep, slotLabelsByStep, error } = inferDisplayState(steps, assembled, prog);
+    const { steps, sourceToConcrete, initialReturnAddr } = simulate(prog, assembled, isa);
+    const { callFramesByStep, slotLabelsByStep, error } = inferDisplayState(
+      steps, assembled, prog, isa, initialReturnAddr,
+    );
 
     this.program = prog;
+    this.isa = isa;
     this.assembled = assembled;
     this.steps = steps;
     this.callFramesByStep = callFramesByStep;
     this.slotLabelsByStep = slotLabelsByStep;
     this.inferError = error;
     this.sourcePositions = [0, ...sourceToConcrete];
-    this.displayRegs = computeDisplayRegs(prog, assembled);
+    this.displayRegs = computeDisplayRegs(prog, assembled, isa);
     this.cur = 0;
     this.asmMode = "source";
     ui.activeTab = "asm";
@@ -178,13 +177,12 @@ export const sim = new SimulationState();
 
 // ─── Deterministic garbage register values for uninitialized display ───────
 
-export const RAND_REGS: Record<string, string> = Object.fromEntries(
-  ALL_REGS.map((r, i) => [r, r === "zero" ? hx(0) : hx(garbageValue(i))]),
-);
-
-export function fmtRegVal(key: string, val: number | null | undefined): string {
-  if (val == null) return RAND_REGS[key] ?? "?";
-  return hx(val);
+export function fmtRegVal(key: string, val: bigint | null | undefined): string {
+  const isa = sim.isa;
+  if (val != null) return hx(val, isa.wordBytes);
+  const i = isa.regs.names.indexOf(key);
+  if (i === -1) return "?";
+  return hx(key === isa.regs.zero ? 0n : garbageReg(i, isa.wordBytes), isa.wordBytes);
 }
 
 // ─── Load the first program immediately ───────────────────────────────────

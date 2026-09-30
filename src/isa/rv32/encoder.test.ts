@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { encode, encodeDetailed, wordBytes } from "./encoder";
+import { encode } from "./encoder";
 import type { Instr } from "./types";
 
 // Reference bytes from `llvm-mc -triple=riscv32 -mattr=+m -show-encoding`.
@@ -34,11 +34,11 @@ const CASES: Array<[string, Instr, number[]]> = [
 
 describe("encode", () => {
   test.each(CASES)("%s", (_, instr, bytes) => {
-    expect(wordBytes(encode(instr))).toEqual(bytes);
+    expect(encode(instr).bytes).toEqual(bytes);
   });
 
   test.each(CASES)("fields of %s tile bits 31..0 in order", (_, instr) => {
-    const { fields } = encodeDetailed(instr);
+    const fields = encode(instr).parts[0]!.fields!;
     let next = 31;
     for (const f of fields) {
       expect(f.hi).toBe(next);
@@ -51,7 +51,7 @@ describe("encode", () => {
 
 describe("immediate reassembly", () => {
   test("S-type joins imm[11:5] and imm[4:0]", () => {
-    const { imm } = encodeDetailed({ op: "sw", rs2: "ra", offset: 12, rs1: "sp" } as Instr);
+    const { imm } = encode({ op: "sw", rs2: "ra", offset: 12, rs1: "sp" } as Instr);
     expect(imm).toEqual({
       parts: [
         { field: "imm[11:5]", bits: "0000000" },
@@ -62,7 +62,7 @@ describe("immediate reassembly", () => {
   });
 
   test("B-type orders pieces by imm bit and appends implicit zero", () => {
-    const { imm } = encodeDetailed({ op: "bne", rs1: "a0", rs2: "a1", target: -4 } as Instr);
+    const { imm } = encode({ op: "bne", rs1: "a0", rs2: "a1", target: -4 } as Instr);
     expect(imm!.parts.map((p) => p.field)).toEqual([
       "imm[12]", "imm[11]", "imm[10:5]", "imm[4:1]", null,
     ]);
@@ -71,7 +71,7 @@ describe("immediate reassembly", () => {
   });
 
   test("J-type reassembles to 21 bits", () => {
-    const { imm } = encodeDetailed({ op: "jal", rd: "zero", target: -4 } as Instr);
+    const { imm } = encode({ op: "jal", rd: "zero", target: -4 } as Instr);
     expect(imm!.parts.map((p) => p.bits).join("")).toBe("111111111111111111100");
   });
 });

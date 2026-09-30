@@ -1,13 +1,13 @@
 <script lang="ts">
   import type { MemoryRegion } from "./types";
   import { sim, ui } from "./state.svelte";
-  import { hx } from "./assembler";
+  import { hx } from "./types";
   import { subSlots, readBytes } from "./memUtils";
   import HexValue from "./HexValue.svelte";
   import SlotMode from "./SlotMode.svelte";
 
   function isHighlighted(addr: number): boolean {
-    const wordAddr = addr & ~3;
+    const wordAddr = addr - (addr % 4);
     return sim.currentStep?.hiSlots.includes(wordAddr) ?? false;
   }
 

@@ -1,7 +1,8 @@
 <script lang="ts">
     import type { FrameInfo, Step } from "./types";
     import { sim, ui } from "./state.svelte";
-    import { garbageWord } from "./memUtils";
+    import { readWritten } from "./memUtils";
+    import { garbageMem } from "./garbage";
     import StackSlot from "./StackSlot.svelte";
     import { _ } from "svelte-i18n";
 
@@ -18,8 +19,11 @@
     // ─── Reactive stack data ──────────────────────────────────────────────
 
     const step = $derived(sim.currentStep);
+    /** Slot size in bytes. */
+    const S = $derived(sim.isa.slotBytes);
+    const spName = $derived(sim.isa.regs.sp);
 
-    const currentSp = $derived(step?.regs?.sp ?? 0);
+    const currentSp = $derived(Number(step?.regs?.[sim.isa.regs.sp] ?? 0));
 
     const callerBase = $derived(
         sim.currentCallFrames.length > 0
@@ -36,7 +40,7 @@
     // Ghost rows above (caller) — includes callerBase itself as the last opaque row
     const callerGhostRows = $derived(
         Array.from({ length: GHOST_ROWS + 1 }, (_, i) => ({
-            addr: callerBase + (GHOST_ROWS - i) * 4,
+            addr: callerBase + (GHOST_ROWS - i) * S,
             opacity: i < GHOST_ROWS ? ((i + 1) / (GHOST_ROWS + 1)).toFixed(2) : "1",
         })),
     );
@@ -44,7 +48,7 @@
     // Ghost rows below (free zone)
     const freeGhostRows = $derived(
         Array.from({ length: GHOST_ROWS }, (_, i) => ({
-            addr: currentSp - (i + 1) * 4,
+            addr: currentSp - (i + 1) * S,
             opacity: ((GHOST_ROWS - i) / (GHOST_ROWS + 1)).toFixed(2),
         })),
     );
@@ -138,7 +142,7 @@
     }
 
     function positionFpArrow(_step: Step, _callerBase: number) {
-        const fpAddr = _step.regs?.s0 ?? 0;
+        const fpAddr = Number(_step.regs?.[sim.isa.regs.fp] ?? 0);
         const target = resolveSlotTarget(fpAddr) ?? resolveSlotTarget(_callerBase);
         positionArrow(fpArrowEl, target, ui.firstFpArrowRender, () => {
             ui.firstFpArrowRender = false;
@@ -151,8 +155,8 @@
         let html = "";
         for (let fi = 0; fi < _activeFrames.length; fi++) {
             const frame = _activeFrames[fi]!;
-            // First slot of this frame is at frameTop - 4
-            const firstSlotAddr = frame.entrySpBefore - 4;
+            // First slot of this frame is at frameTop - S
+            const firstSlotAddr = frame.entrySpBefore - S;
             const slotEl = slotEls.get(firstSlotAddr);
             if (!slotEl) continue;
             const rect = slotEl.getBoundingClientRect();
@@ -180,7 +184,7 @@
                     const sign = offset > 0 ? "+" : "";
                     const rect = subEl.getBoundingClientRect();
                     const top = rect.top - wTop + rect.height / 2;
-                    html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">sp${sign}${offset}</div>`;
+                    html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">${spName}${sign}${offset}</div>`;
                 });
             } else {
                 const offset = addr - _sp;
@@ -189,26 +193,15 @@
                 const sign = offset > 0 ? "+" : "";
                 const rect = el.getBoundingClientRect();
                 const top = rect.top - wTop + rect.height / 2;
-                html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">sp${sign}${offset}</div>`;
+                html += `<div class="offset-arrow" style="top:${top}px;opacity:${opacity}">${spName}${sign}${offset}</div>`;
             }
         }
         offsetsEl.innerHTML = html;
     }
 
-    function getSlotMemVal(addr: number): number | undefined {
+    function getSlotMemVal(addr: number): bigint | undefined {
         if (!step?.mem) return undefined;
-        const b0 = step.mem.get(addr);
-        const b1 = step.mem.get(addr + 1);
-        const b2 = step.mem.get(addr + 2);
-        const b3 = step.mem.get(addr + 3);
-        if (b0 === undefined && b1 === undefined && b2 === undefined && b3 === undefined)
-            return undefined;
-        return (
-            ((b0 ?? 0) & 0xff) |
-            (((b1 ?? 0) & 0xff) << 8) |
-            (((b2 ?? 0) & 0xff) << 16) |
-            (((b3 ?? 0) & 0xff) << 24)
-        );
+        return readWritten(step.mem, addr, S);
     }
 
     function slotMode(key: string): 'word' | 'halfword' | 'byte' {
@@ -252,14 +245,14 @@
                 bind:this={fpArrowEl}
                 style="display: {ui.showFp ? 'flex' : 'none'}"
             >
-                <span class="fp-label">fp</span>
+                <span class="fp-label">{sim.isa.regs.fpLabel}</span>
                 <span class="fp-arrow-shaft"></span>
                 <span class="fp-arrow-head"></span>
             </div>
 
             <!-- SP arrow -->
             <div class="sp-arrow" bind:this={spArrowEl}>
-                <span class="sp-label">sp</span>
+                <span class="sp-label">{spName}</span>
                 <span class="sp-arrow-shaft"></span>
                 <span class="sp-arrow-head"></span>
             </div>
@@ -275,7 +268,7 @@
                     {#each callerGhostRows as row}
                         {@const key = `stack-${row.addr.toString(16)}`}
                         {@const mode = slotMode(key)}
-                        {@const gWord = garbageWord(row.addr)}
+                        {@const gWord = garbageMem(row.addr, S)}
                         {@const memVal = getSlotMemVal(row.addr)}
                         <div
                             class="frame-slot"
@@ -284,6 +277,7 @@
                             use:registerSlotAction={row.addr}
                         >
                             <StackSlot
+                                size={S}
                                 addr={row.addr}
                                 {mode}
                                 {memVal}
@@ -302,8 +296,8 @@
                     {@const frameBot =
                         frame.entrySpBefore - frame.allocatedSize}
                     {@const frameSlots = Array.from(
-                        { length: (frameTop - frameBot) / 4 },
-                        (_, i) => frameTop - 4 - i * 4,
+                        { length: (frameTop - frameBot) / S },
+                        (_, i) => frameTop - S - i * S,
                     )}
                     <div
                         class="frame"
@@ -316,7 +310,7 @@
                             {@const isHi = hiS.has(addr)}
                             {@const key = `stack-${addr.toString(16)}`}
                             {@const mode = slotMode(key)}
-                            {@const gWord = garbageWord(addr)}
+                            {@const gWord = garbageMem(addr, S)}
                             <div
                                 class="frame-slot"
                                 class:hi={isHi}
@@ -325,6 +319,7 @@
                                 use:registerSlotAction={addr}
                             >
                                 <StackSlot
+                                    size={S}
                                     {addr}
                                     {mode}
                                     {memVal}
@@ -343,7 +338,7 @@
                     {#each freeGhostRows as row}
                         {@const key = `stack-${row.addr.toString(16)}`}
                         {@const mode = slotMode(key)}
-                        {@const gWord = garbageWord(row.addr)}
+                        {@const gWord = garbageMem(row.addr, S)}
                         {@const memVal = getSlotMemVal(row.addr)}
                         <div
                             class="frame-slot"
@@ -351,6 +346,7 @@
                             use:registerSlotAction={row.addr}
                         >
                             <StackSlot
+                                size={S}
                                 addr={row.addr}
                                 {mode}
                                 {memVal}

@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { hx } from "./assembler";
+  import { hx } from "./types";
   import { _ } from "svelte-i18n";
 
-  let { value, elementSize = 4, faint = false }: { value: number; elementSize?: 1 | 2 | 4; faint?: boolean } =
-    $props();
+  let {
+    value,
+    elementSize = 4,
+    faint = false,
+  }: { value: number | bigint; elementSize?: 1 | 2 | 4 | 8; faint?: boolean } = $props();
 
-  const unsigned = $derived(value >>> 0);
-  const signed = $derived.by(() => {
-    const shift = (4 - elementSize) * 8;
-    return (unsigned << shift) >> shift;
-  });
+  const unsigned = $derived(BigInt.asUintN(elementSize * 8, BigInt(value)));
+  const signed = $derived(BigInt.asIntN(elementSize * 8, BigInt(value)));
 
   let show = $state(false);
   let x = $state(0);

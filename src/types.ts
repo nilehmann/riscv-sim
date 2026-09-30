@@ -1,50 +1,15 @@
-export const hx = (v: number, bytes: 1 | 2 | 4 = 4): string =>
-  "0x" +
-  (v >>> 0)
-    .toString(16)
-    .toUpperCase()
-    .padStart(bytes * 2, "0");
+import type { ControlFlow, IsaId } from "./isa/types";
 
-export const ALL_REGS = [
-  "zero",
-  "ra",
-  "sp",
-  "gp",
-  "tp",
-  "a0",
-  "a1",
-  "a2",
-  "a3",
-  "a4",
-  "a5",
-  "a6",
-  "a7",
-  "s0",
-  "s1",
-  "s2",
-  "s3",
-  "s4",
-  "s5",
-  "s6",
-  "s7",
-  "s8",
-  "s9",
-  "s10",
-  "s11",
-  "t0",
-  "t1",
-  "t2",
-  "t3",
-  "t4",
-  "t5",
-  "t6",
-] as const;
-
-export type Reg = (typeof ALL_REGS)[number];
-
-export function isReg(s: string): s is Reg {
-  return (ALL_REGS as readonly string[]).includes(s);
-}
+export const hx = (v: number | bigint, bytes: 1 | 2 | 4 | 8 = 4): string => {
+  if (typeof v === "number" && !Number.isInteger(v)) return "0x" + "?".repeat(bytes * 2);
+  return (
+    "0x" +
+    BigInt.asUintN(bytes * 8, BigInt(v))
+      .toString(16)
+      .toUpperCase()
+      .padStart(bytes * 2, "0")
+  );
+};
 
 export interface MemoryRegion {
   addr: number;
@@ -54,6 +19,8 @@ export interface MemoryRegion {
 
 export interface Program {
   name: string;
+  /** Instruction set the assembly is written for. Default: "rv32" */
+  isa?: IsaId;
   cCode?: string;
   entryPoint?: string;
   initialRegs: Record<string, number>;
@@ -68,67 +35,6 @@ export interface Program {
   showStack?: boolean;
 }
 
-export type ParsedInstr =
-  | { op: "ret" }
-  | { op: "nop" }
-  | { op: "jalr"; rd: Reg; rs1: Reg; imm: number }
-  | { op: "call" | "j"; target: string }
-  | { op: "jal"; rd: Reg; target: string }
-  | { op: "jr"; rs: Reg }
-  | { op: "li" | "lui"; rd: Reg; imm: number }
-  | { op: "mv" | "neg"; rd: Reg; rs1: Reg }
-  | {
-      op: "addi" | "slli" | "srli" | "srai" | "andi" | "ori" | "xori";
-      rd: Reg;
-      rs1: Reg;
-      imm: number;
-    }
-  | {
-      op:
-        | "add"
-        | "sub"
-        | "mul"
-        | "div"
-        | "rem"
-        | "and"
-        | "or"
-        | "xor"
-        | "sll"
-        | "srl"
-        | "sra";
-      rd: Reg;
-      rs1: Reg;
-      rs2: Reg;
-    }
-  | { op: "sw" | "sh" | "sb"; rs2: Reg; offset: number; rs1: Reg }
-  | {
-      op: "lw" | "lh" | "lb" | "lhu" | "lbu";
-      rd: Reg;
-      offset: number;
-      rs1: Reg;
-    }
-  | {
-      op:
-        | "beq"
-        | "bne"
-        | "blt"
-        | "bge"
-        | "bltu"
-        | "bgeu"
-        | "bgt"
-        | "ble"
-        | "bgtu"
-        | "bleu";
-      rs1: Reg;
-      rs2: Reg;
-      target: string;
-    }
-  | {
-      op: "beqz" | "bnez" | "bltz" | "bgez" | "bgtz" | "blez";
-      rs1: Reg;
-      target: string;
-    };
-
 export class AppError {
   readonly kind = "AppError" as const;
   constructor(
@@ -137,73 +43,33 @@ export class AppError {
   ) {}
 }
 
-declare const __bits: unique symbol;
-export type Imm<N extends number> = number & { [__bits]: N };
-
-export function imm<N extends number>(value: number, bits: N): Imm<N> | AppError {
-  const min = -(1 << (bits - 1));
-  const max = (1 << (bits - 1)) - 1;
-  if (value < min || value > max)
-    return new AppError(`Immediate ${value} does not fit in a signed ${bits}-bit field`);
-  return value as Imm<N>;
+/** A machine instruction placed in memory. */
+export interface Concrete<I = unknown> {
+  instr: I;
+  addr: number;
+  /** Encoded size in bytes. */
+  size: number;
 }
 
-export type Instr =
-  | { op: "jalr"; rd: Reg; rs1: Reg; imm: Imm<12> }
-  | { op: "lui" | "auipc"; rd: Reg; imm: Imm<20> }
-  | { op: "jal"; rd: Reg; target: Imm<21> } // PC-relative offset
-  | {
-      op: "addi" | "slli" | "srli" | "srai" | "andi" | "ori" | "xori";
-      rd: Reg;
-      rs1: Reg;
-      imm: Imm<12>;
-    }
-  | {
-      op:
-        | "add"
-        | "sub"
-        | "mul"
-        | "div"
-        | "rem"
-        | "and"
-        | "or"
-        | "xor"
-        | "sll"
-        | "srl"
-        | "sra";
-      rd: Reg;
-      rs1: Reg;
-      rs2: Reg;
-    }
-  | {
-      op: "lw" | "lh" | "lb" | "lhu" | "lbu";
-      rd: Reg;
-      offset: Imm<12>;
-      rs1: Reg;
-    }
-  | { op: "sw" | "sh" | "sb"; rs2: Reg; offset: Imm<12>; rs1: Reg }
-  | {
-      op: "beq" | "bne" | "blt" | "bge" | "bltu" | "bgeu";
-      rs1: Reg;
-      rs2: Reg;
-      target: Imm<13>; // PC-relative offset
-    };
-
-export interface SourceInstr {
+export interface SourceInstr<P = unknown, I = unknown> {
   /** Labels written immediately before this instruction, in source order. */
   labels: string[];
   raw: string;
-  parsed: ParsedInstr;
-  concretes: Instr[];
+  parsed: P;
+  /** Machine instructions this line assembles to, in address order. */
+  concretes: Concrete<I>[];
   firstAddr: number;
 }
 
-export interface AssemblyResult {
-  sourceInstrs: SourceInstr[];
+export interface AssemblyResult<P = unknown, I = unknown> {
+  sourceInstrs: SourceInstr<P, I>[];
+  /** Address of every concrete instruction → index into sourceInstrs. */
   addrToSourceIdx: Map<number, number>;
   labels: Record<string, number>;
   /** Labels after the last instruction; they point just past the end of the code. */
   trailingLabels: string[];
+  /** First address past the last instruction. */
+  endAddr: number;
 }
 
 export interface FrameInfo {
@@ -216,17 +82,22 @@ export interface FrameInfo {
 export interface Step {
   aHl: number[];
   nextAddr: number | null;
-  regs: Record<string, number>;
+  /** Register values, unsigned and as wide as the ISA's registers. */
+  regs: Record<string, bigint>;
   hiReg: string[];
   mem: Map<number, number>;
   hiSlots: number[];
   store?: { addr: number; reg: string };
   fault?: { type: "segfault"; addr: number };
+  /** Control transfer done by the instruction of this step, if any. */
+  control?: ControlFlow;
 }
 
 export interface SimulateResult {
   steps: Step[];
   sourceToConcrete: number[]; // steps index of last concrete step of source[i]
+  /** Where the entry function returns to, if known. */
+  initialReturnAddr: number | null;
 }
 
 export interface DisplayReg {
@@ -234,6 +105,3 @@ export interface DisplayReg {
   desc: string;
   key: string;
 }
-
-export type TokenKind = "comment" | "string" | "kw" | "fn" | "num" | "text";
-export type Token = [TokenKind, string];

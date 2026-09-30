@@ -1,5 +1,6 @@
 import { AppError, hx } from "./types";
 import type { Program, MemoryRegion, AssemblyResult } from "./types";
+import type { Isa } from "./isa/types";
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -86,11 +87,16 @@ export function checkEntryPoint(
   return null;
 }
 
-export function checkRaRange(ra: number, progStart: number, progEnd: number): AppError | null {
+export function checkRaRange(
+  ra: number,
+  progStart: number,
+  progEnd: number,
+  name = "ra",
+): AppError | null {
   if (ra >= progStart && ra < progEnd)
     return new AppError(
-      `Initial ra (${hx(ra)}) points inside the program range [${hx(progStart)}–${hx(progEnd - 4)}]`,
-      `Set initialRegs.ra to an address outside the program`,
+      `Initial ${name} (${hx(ra)}) points inside the program range [${hx(progStart)}–${hx(progEnd - 1)}]`,
+      `Set initialRegs.${name} to an address outside the program`,
     );
   return null;
 }
@@ -122,7 +128,7 @@ export function checkRegionCodeOverlap(
 
 // ── Umbrella functions ─────────────────────────────────────────────────────
 
-export function validateProgram(prog: Program): AppError | null {
+export function validateProgram(prog: Program, isa: Isa): AppError | null {
   let err: AppError | null;
 
   err = checkU32(prog.baseAddress, "baseAddress");
@@ -133,16 +139,17 @@ export function validateProgram(prog: Program): AppError | null {
     if (err) return err;
   }
 
+  const bits = isa.wordBytes * 8;
   for (const [reg, val] of Object.entries(prog.initialRegs)) {
-    if (val >>> 0 !== val)
+    if (!Number.isSafeInteger(val) || val < 0 || BigInt(val) >> BigInt(bits) !== 0n)
       return new AppError(
-        `Initial register ${reg} = 0x${val.toString(16).toUpperCase()} does not fit in 32 bits`,
+        `Initial register ${reg} = 0x${val.toString(16).toUpperCase()} does not fit in ${bits} bits`,
       );
   }
 
   if (prog.osMode !== false) {
     const stackBase = prog.stackBase ?? 0xc0000000;
-    err = checkSpStackBase(prog.initialRegs.sp ?? 0, stackBase);
+    err = checkSpStackBase(prog.initialRegs[isa.regs.sp] ?? 0, stackBase);
     if (err) return err;
   }
 
@@ -153,18 +160,21 @@ export function validateProgram(prog: Program): AppError | null {
   }
 
   const stackBase = prog.stackBase ?? 0xc0000000;
-  const sp = prog.initialRegs.sp ?? stackBase;
+  const sp = prog.initialRegs[isa.regs.sp] ?? stackBase;
   err = checkRegionStackOverlap(regions, sp, stackBase);
   if (err) return err;
 
   return checkRegionRegionOverlap(regions);
 }
 
-export function validateAssembled(prog: Program, assembled: AssemblyResult): AppError | null {
-  const { sourceInstrs, labels } = assembled;
+export function validateAssembled(
+  prog: Program,
+  assembled: AssemblyResult,
+  isa: Isa,
+): AppError | null {
+  const { labels } = assembled;
   const progStart = prog.baseAddress;
-  const lastSi = sourceInstrs[sourceInstrs.length - 1];
-  const progEnd = lastSi ? lastSi.firstAddr + lastSi.concretes.length * 4 : progStart;
+  const progEnd = assembled.endAddr;
   const stackBase = prog.stackBase ?? 0xc0000000;
 
   let err: AppError | null;
@@ -174,8 +184,11 @@ export function validateAssembled(prog: Program, assembled: AssemblyResult): App
     if (err) return err;
   }
 
-  err = checkRaRange(prog.initialRegs.ra ?? 0, progStart, progEnd);
-  if (err) return err;
+  const ra = isa.regs.returnAddr;
+  if (ra) {
+    err = checkRaRange(prog.initialRegs[ra] ?? 0, progStart, progEnd, ra);
+    if (err) return err;
+  }
 
   err = checkCodeStackOverlap(progEnd, stackBase);
   if (err) return err;

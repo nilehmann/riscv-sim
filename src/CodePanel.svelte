@@ -1,11 +1,8 @@
 <script lang="ts">
-    import type { AssemblyResult, Instr, Reg, SourceInstr } from "./types";
-    import { ALL_REGS } from "./types";
+    import type { AssemblyResult, Concrete, SourceInstr } from "./types";
+    import { hx } from "./types";
     import { sim, ui } from "./state.svelte";
-    import { hx, fmtConcreteRel } from "./assembler";
-    import { garbageValue } from "./simulator";
-    import { encode, wordBytes } from "./encoder";
-    import InstrView from "./InstrView.svelte";
+    import Tokens from "./Tokens.svelte";
     import EncodingPopover from "./EncodingPopover.svelte";
     import Popover from "./Popover.svelte";
     import { _ } from "svelte-i18n";
@@ -16,98 +13,46 @@
         return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
-    // ─── Concrete instruction highlighter (machine view, garbage rows) ────
-    // Used for expanded pseudo-instructions where we only have a formatted
-    // string (from fmtConcreteRel), not a SourceInstr.
-
-    const REG_PAT = /^(zero|ra|sp|gp|tp|fp|[xast]\d+|t\d+|a\d+|s\d+)$/;
-
-    function hlConcreteInstr(raw: string, labels: Record<string, number>, addr: number): string {
-        const trimmed = raw.trim();
-        const spIdx = trimmed.indexOf(" ");
-        if (spIdx === -1) return `<span class="kw">${esc(trimmed)}</span>`;
-        const op = trimmed.slice(0, spIdx);
-        const rest = trimmed.slice(spIdx + 1);
-        const parts = rest.split(",").map(tok => {
-            const t = tok.trim();
-            if (REG_PAT.test(t)) return `<span class="reg">${esc(t)}</span>`;
-            if (/^[+-]?\d+$/.test(t) || /^0x[\da-fA-F]+$/.test(t))
-                return `<span class="imm">${esc(t)}</span>`;
-            // memory operand: 12(sp)
-            const memM = t.match(/^([^(]+)\((\w+)\)$/);
-            if (memM) return `<span class="imm">${esc(memM[1]!)}</span>(<span class="reg">${esc(memM[2]!)}</span>)`;
-            // label / target
-            if (t in labels) {
-                const tgt = labels[t]!;
-                return `<span class="fn" data-target-addr="${tgt}" data-tooltip="addr: ${hx(tgt)}">${esc(t)}</span>`;
-            }
-            return `<span class="fn">${esc(t)}</span>`;
-        });
-        return `<span class="kw">${esc(op)}</span> ${parts.join(", ")}`;
-    }
-
     // ─── Garbage instructions (before/after the visible program) ──────────
     // Deterministic filler rows showing arbitrary code exists at nearby
     // addresses too — same idea as garbage register/memory defaults.
 
-    const GARBAGE_REGS = ALL_REGS.filter((r) => r !== "zero");
-
-    function greg(h: number, salt: number): Reg {
-        const idx = Math.abs((h >> (salt * 6)) ^ Math.imul(salt + 1, 0x2545f4)) % GARBAGE_REGS.length;
-        return GARBAGE_REGS[idx]!;
-    }
-    function gimm(h: number): number {
-        return ((h >>> 8) % 2048) - 1024;
-    }
-
-    // Immediates are built in range, so the Imm<N> brands hold.
-    const GARBAGE_TEMPLATES = [
-        (h) => ({ op: "addi", rd: greg(h, 0), rs1: greg(h, 1), imm: gimm(h) }),
-        (h) => ({ op: "lw", rd: greg(h, 0), offset: gimm(h) & 0xff, rs1: greg(h, 1) }),
-        (h) => ({ op: "sw", rs2: greg(h, 0), offset: gimm(h) & 0xff, rs1: greg(h, 1) }),
-        (h) => ({ op: "xor", rd: greg(h, 0), rs1: greg(h, 1), rs2: greg(h, 2) }),
-        (h) => ({ op: "or", rd: greg(h, 0), rs1: greg(h, 1), rs2: greg(h, 2) }),
-        (h) => ({ op: "slli", rd: greg(h, 0), rs1: greg(h, 1), imm: Math.abs(h >>> 3) % 32 }),
-    ] as Array<(h: number) => Instr>;
-
-    function garbageInstr(addr: number): Instr {
-        const h = garbageValue(addr);
-        return GARBAGE_TEMPLATES[Math.abs(h) % GARBAGE_TEMPLATES.length]!(h);
-    }
-
     interface GarbageRow {
-        addr: number;
         tier: "near" | "far";
-        instr: Instr;
-        html: string;
+        c: Concrete;
     }
 
-    function garbageRows(addrs: number[], nearIsFirst: boolean): GarbageRow[] {
-        return addrs.map((addr, i) => {
-            const instr = garbageInstr(addr);
-            return {
-                addr,
-                tier: (nearIsFirst ? i === 0 : i === addrs.length - 1) ? "near" : "far",
-                instr,
-                html: hlConcreteInstr(fmtConcreteRel(instr, addr), {}, addr),
-            };
-        });
+    function garbageAt(seed: number): { instr: unknown; size: number } {
+        const instr = sim.isa.garbage(seed);
+        return { instr, size: sim.isa.size(instr) };
     }
 
     // Rendered top-to-bottom: farthest first, nearest last (right above real code).
+    // Built backwards so the nearest one ends exactly where the code starts.
     const garbageBefore = $derived.by((): GarbageRow[] => {
         const first = sim.assembled?.sourceInstrs[0]?.firstAddr;
         if (first == null) return [];
-        return garbageRows([first - 8, first - 4], false);
+        const rows: GarbageRow[] = [];
+        let end = first;
+        for (let i = 0; i < 2; i++) {
+            const { instr, size } = garbageAt(end);
+            end -= size;
+            rows.unshift({ tier: i === 0 ? "near" : "far", c: { instr, addr: end, size } });
+        }
+        return rows;
     });
 
     // Rendered top-to-bottom: nearest first (right after real code), farthest last.
     const garbageAfter = $derived.by((): GarbageRow[] => {
-        const instrs = sim.assembled?.sourceInstrs;
-        if (!instrs || instrs.length === 0) return [];
-        const last = instrs[instrs.length - 1]!;
-        const lastAddr = last.firstAddr + (last.concretes.length - 1) * 4;
-        return garbageRows([lastAddr + 4, lastAddr + 8], true);
+        if (!sim.assembled || sim.assembled.sourceInstrs.length === 0) return [];
+        const rows: GarbageRow[] = [];
+        let addr = sim.assembled.endAddr;
+        for (let i = 0; i < 2; i++) {
+            const { instr, size } = garbageAt(addr);
+            rows.push({ tier: i === 0 ? "near" : "far", c: { instr, addr, size } });
+            addr += size;
+        }
+        return rows;
     });
 
     // ─── C syntax highlighter ─────────────────────────────────────────────
@@ -276,8 +221,8 @@
 
     // ─── Machine view: bytes per row, encoding popover on hover/click ─────
 
-    function hexBytes(instr: Instr): string[] {
-        return wordBytes(encode(instr)).map((b) =>
+    function hexBytes(c: Concrete): string[] {
+        return sim.isa.encode(c.instr).bytes.map((b) =>
             b.toString(16).toUpperCase().padStart(2, "0"),
         );
     }
@@ -285,9 +230,9 @@
     // Real instructions by address, with the source line each came from
     // (garbage rows are not hoverable).
     const machineInstrs = $derived.by(() => {
-        const m = new Map<number, { instr: Instr; si: SourceInstr }>();
+        const m = new Map<number, { c: Concrete; si: SourceInstr }>();
         for (const si of sim.assembled?.sourceInstrs ?? [])
-            si.concretes.forEach((instr, i) => m.set(si.firstAddr + i * 4, { instr, si }));
+            for (const c of si.concretes) m.set(c.addr, { c, si });
         return m;
     });
 
@@ -343,7 +288,7 @@
 
     // A source line is a pseudo-instruction if it expanded to something else.
     function isPseudo(si: SourceInstr): boolean {
-        return si.concretes.length > 1 || si.concretes[0]!.op !== si.parsed.op;
+        return sim.isa.isPseudo(si.parsed, si.concretes.map((c) => c.instr));
     }
 
     // Bumped on scroll/resize so the popover follows its row.
@@ -410,13 +355,14 @@
                         </div>
                     {/snippet}
                     {#snippet garbageRow(g: GarbageRow)}
-                        <div class="line garbage garbage-{g.tier}" id="al-{g.addr.toString(16)}">
+                        <div class="line garbage garbage-{g.tier}" id="al-{g.c.addr.toString(16)}">
                             <span class="pc-arrow">▶</span>
-                            <span class="asm-addr">{hx(g.addr)}</span>
-                            <span class="instr-span">{@html g.html}</span>
+                            <span class="asm-addr">{hx(g.c.addr)}</span>
+                            <span class="instr-span"><Tokens tokens={sim.isa.tokens(g.c.instr, g.c.addr)} /></span>
                         </div>
                     {/snippet}
-                    {#snippet machineRow(addr: number, instr: Instr, extraClass: string)}
+                    {#snippet machineRow(c: Concrete, extraClass: string)}
+                        {@const addr = c.addr}
                         <div
                             class="line machine-row {extraClass}"
                             class:enc-open={popAddr === addr}
@@ -426,9 +372,9 @@
                             <span class="pc-arrow">▶</span>
                             <span class="asm-addr">{hx(addr)}</span>
                             <span class="instr-span mc-bytes">
-                                {#each hexBytes(instr) as b}<span>{b}</span>{/each}
+                                {#each hexBytes(c) as b}<span>{b}</span>{/each}
                             </span>
-                            <span class="mc-instr">{@html hlConcreteInstr(fmtConcreteRel(instr, addr), sim.assembled?.labels ?? {}, addr)}</span>
+                            <span class="mc-instr"><Tokens tokens={sim.isa.tokens(c.instr, addr)} /></span>
                             {#if !extraClass.includes("garbage")}
                                 <!-- Hover (or focus) shows the encoding popover, click pins it -->
                                 <button
@@ -456,7 +402,7 @@
                             >
                                 <span class="pc-arrow">▶</span>
                                 <span class="asm-addr">{hx(si.firstAddr)}</span>
-                                <span class="instr-span"><InstrView {si} labels={sim.assembled!.labels} /></span>
+                                <span class="instr-span"><Tokens tokens={sim.isa.sourceTokens(si.parsed, si.raw, sim.assembled!.labels)} /></span>
                                 <!-- Hover (or focus) shows what this line assembles to -->
                                 <button
                                     class="row-info"
@@ -472,21 +418,21 @@
                         {#each garbageAfter as g}{@render garbageRow(g)}{/each}
                     {:else}
                         <!-- Machine view: little-endian bytes of each concrete instruction -->
-                        {#each garbageBefore as g}{@render machineRow(g.addr, g.instr, `garbage garbage-${g.tier}`)}{/each}
+                        {#each garbageBefore as g}{@render machineRow(g.c, `garbage garbage-${g.tier}`)}{/each}
                         {#each groups as { labels, si }}
                             {#each labels as label}{@render labelRow(label)}{/each}
                             {#if si.concretes.length === 1}
-                                {@render machineRow(si.firstAddr, si.concretes[0]!, "")}
+                                {@render machineRow(si.concretes[0]!, "")}
                             {:else}
                                 <div class="concrete-group">
-                                    {#each si.concretes as c, i}
-                                        {@render machineRow(si.firstAddr + i * 4, c, "")}
+                                    {#each si.concretes as c}
+                                        {@render machineRow(c, "")}
                                     {/each}
                                 </div>
                             {/if}
                         {/each}
                         {#each sim.assembled.trailingLabels as label}{@render labelRow(label)}{/each}
-                        {#each garbageAfter as g}{@render machineRow(g.addr, g.instr, `garbage garbage-${g.tier}`)}{/each}
+                        {#each garbageAfter as g}{@render machineRow(g.c, `garbage garbage-${g.tier}`)}{/each}
                     {/if}
                 </div>
             {/if}
@@ -501,9 +447,7 @@
 
 {#if sim.asmMode === "machine" && popAddr != null && popEntry && popAnchor}
     <EncodingPopover
-        instr={popEntry.instr}
-        addr={popAddr}
-        instrHtml={hlConcreteInstr(fmtConcreteRel(popEntry.instr, popAddr), {}, popAddr)}
+        concrete={popEntry.c}
         pseudo={isPseudo(popEntry.si) ? popEntry.si : null}
         labels={sim.assembled?.labels ?? {}}
         anchor={popAnchor}
@@ -515,9 +459,8 @@
 {:else if sim.asmMode === "source" && popAddr != null && popSource && popAnchor}
     <Popover anchor={popAnchor} onenter={keepPopover} onleave={hidePopoverSoon}>
         <div class="expansion">
-            {#each popSource.concretes as c, i}
-                {@const ciAddr = popSource.firstAddr + i * 4}
-                <div>{@html hlConcreteInstr(fmtConcreteRel(c, ciAddr), {}, ciAddr)}</div>
+            {#each popSource.concretes as c}
+                <div><Tokens tokens={sim.isa.tokens(c.instr, c.addr)} /></div>
             {/each}
         </div>
     </Popover>

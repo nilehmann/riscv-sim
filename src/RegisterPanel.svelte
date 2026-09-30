@@ -1,6 +1,6 @@
 <script lang="ts">
     import { sim, ui, fmtRegVal } from "./state.svelte";
-    import { hx } from "./assembler";
+    import { hx } from "./types";
     import HexValue from "./HexValue.svelte";
     import { _ } from "svelte-i18n";
 
@@ -29,20 +29,20 @@
             {#each sim.displayRegs as r}
                 {@const val = sim.currentStep?.regs?.[r.key] ?? null}
                 <div class="reg-row" class:hi={hiR.has(r.name)}>
-                    {#if r.key === "s0"}
+                    {#if r.key === sim.isa.regs.fp}
                         <div class="reg-row-name-line">
                             <span class="reg-name">{r.name}</span>
                             <button
                                 class="fp-pill"
                                 class:active={ui.showFp}
-                                onclick={toggleFp}>fp</button
+                                onclick={toggleFp}>{sim.isa.regs.fpLabel}</button
                             >
                         </div>
                     {:else}
                         <span class="reg-name">{r.name}</span>
                     {/if}
                     {#if val !== null}
-                        <HexValue value={val} />
+                        <HexValue value={val} elementSize={sim.isa.wordBytes} />
                     {:else}
                         <span class="reg-val">{fmtRegVal(r.key, null)}</span>
                     {/if}
