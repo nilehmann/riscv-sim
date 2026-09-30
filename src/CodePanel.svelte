@@ -188,19 +188,12 @@
     // ─── Line groups: label headers + source instrs (computed from assembled)
 
     interface SourceGroup {
-        label: string | null;  // label to show before this group, if changed
+        labels: string[];  // label lines to show before this instruction
         si: SourceInstr;
     }
 
     function buildGroups(assembled: AssemblyResult): SourceGroup[] {
-        const groups: SourceGroup[] = [];
-        let lastLabel: string | null = null;
-        for (const si of assembled.sourceInstrs) {
-            const labelChanged = si.label !== lastLabel;
-            groups.push({ label: labelChanged ? si.label : null, si });
-            lastLabel = si.label;
-        }
-        return groups;
+        return assembled.sourceInstrs.map((si) => ({ labels: si.labels, si }));
     }
 
     // ─── Reactive highlights: addresses → hl/next-instr classes ──────────
@@ -410,6 +403,12 @@
             <!-- Assembly lines -->
             {#if sim.assembled}
                 <div id="view-asm">
+                    {#snippet labelRow(label: string)}
+                        <div class="line">
+                            <span class="asm-addr"></span>
+                            <span class="lbl">{label}:</span>
+                        </div>
+                    {/snippet}
                     {#snippet garbageRow(g: GarbageRow)}
                         <div class="line garbage garbage-{g.tier}" id="al-{g.addr.toString(16)}">
                             <span class="pc-arrow">▶</span>
@@ -448,13 +447,8 @@
                     {#if sim.asmMode === "source"}
                         <!-- Source view: one row per source instruction -->
                         {#each garbageBefore as g}{@render garbageRow(g)}{/each}
-                        {#each groups as { label, si }}
-                            {#if label !== null}
-                                <div class="line">
-                                    <span class="asm-addr"></span>
-                                    <span class="lbl">{label}:</span>
-                                </div>
-                            {/if}
+                        {#each groups as { labels, si }}
+                            {#each labels as label}{@render labelRow(label)}{/each}
                             <div
                                 class="line"
                                 class:enc-open={popAddr === si.firstAddr}
@@ -474,17 +468,13 @@
                                 >{@html INFO_SVG}</button>
                             </div>
                         {/each}
+                        {#each sim.assembled.trailingLabels as label}{@render labelRow(label)}{/each}
                         {#each garbageAfter as g}{@render garbageRow(g)}{/each}
                     {:else}
                         <!-- Machine view: little-endian bytes of each concrete instruction -->
                         {#each garbageBefore as g}{@render machineRow(g.addr, g.instr, `garbage garbage-${g.tier}`)}{/each}
-                        {#each groups as { label, si }}
-                            {#if label !== null}
-                                <div class="line">
-                                    <span class="asm-addr"></span>
-                                    <span class="lbl">{label}:</span>
-                                </div>
-                            {/if}
+                        {#each groups as { labels, si }}
+                            {#each labels as label}{@render labelRow(label)}{/each}
                             {#if si.concretes.length === 1}
                                 {@render machineRow(si.firstAddr, si.concretes[0]!, "")}
                             {:else}
@@ -495,6 +485,7 @@
                                 </div>
                             {/if}
                         {/each}
+                        {#each sim.assembled.trailingLabels as label}{@render labelRow(label)}{/each}
                         {#each garbageAfter as g}{@render machineRow(g.addr, g.instr, `garbage garbage-${g.tier}`)}{/each}
                     {/if}
                 </div>

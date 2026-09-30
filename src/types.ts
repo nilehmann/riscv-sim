@@ -190,7 +190,8 @@ export type Instr =
     };
 
 export interface SourceInstr {
-  label: string | null;
+  /** Labels written immediately before this instruction, in source order. */
+  labels: string[];
   raw: string;
   parsed: ParsedInstr;
   concretes: Instr[];
@@ -201,6 +202,8 @@ export interface AssemblyResult {
   sourceInstrs: SourceInstr[];
   addrToSourceIdx: Map<number, number>;
   labels: Record<string, number>;
+  /** Labels after the last instruction; they point just past the end of the code. */
+  trailingLabels: string[];
 }
 
 export interface FrameInfo {

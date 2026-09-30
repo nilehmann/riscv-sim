@@ -8,7 +8,6 @@ import type {
 import { AppError, hx, imm } from "./types";
 import type { Imm } from "./types";
 import { parseProgram } from "./parser";
-import type { ParsedLine } from "./parser";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 export { hx };
@@ -29,7 +28,19 @@ function assembleInstr(
   const BR_MAX = (1 << 12) - 1;
   const BR_MIN = -(1 << 12);
 
+  // hasOwnProperty, not `in`: labels is a plain object, so `in` would accept
+  // inherited names like "toString".
+  function undefinedLabel(target: string): AppError | null {
+    if (Object.prototype.hasOwnProperty.call(labels, target)) return null;
+    return new AppError(
+      `Undefined label '${target}'`,
+      `Instruction: ${raw}` + (label ? `, label: ${label}` : ""),
+    );
+  }
+
   function resolveJalOffset(target: string): Imm<21> | AppError {
+    const undef = undefinedLabel(target);
+    if (undef) return undef;
     const labelAddr = labels[target];
     const offset = labelAddr - addr;
     if (offset < JAL_MIN || offset > JAL_MAX)
@@ -41,6 +52,8 @@ function assembleInstr(
   }
 
   function resolveBranchOffset(target: string): Imm<13> | AppError {
+    const undef = undefinedLabel(target);
+    if (undef) return undef;
     const labelAddr = labels[target];
     const offset = labelAddr - addr;
     if (offset < BR_MIN || offset > BR_MAX)
@@ -62,6 +75,9 @@ function assembleInstr(
       return [{ op: "jalr", rd: p.rd, rs1: p.rs1, imm: immVal }];
     }
     case "call": {
+      // Check first: any error below falls back to a far call (auipc + jalr).
+      const undef = undefinedLabel(p.target);
+      if (undef) return undef;
       const offset = resolveJalOffset(p.target);
       if (offset instanceof AppError) {
         // Offset too large for JAL: emit auipc + jalr
@@ -217,28 +233,33 @@ function worstCaseSize(parsed: ParsedInstr): number {
 export function assembleProgram(prog: Program): AssemblyResult | AppError {
   // ── Pass 1: parse all instructions and assign label addresses ──────────
   // Use worst-case sizes so label addresses are upper bounds.
-  const parsedLines = parseProgram(prog);
-  if (parsedLines instanceof AppError) return parsedLines;
+  const parsedProgram = parseProgram(prog);
+  if (parsedProgram instanceof AppError) return parsedProgram;
+  const { lines: parsedLines, trailingLabels } = parsedProgram;
 
   // Pass 1: section-relative addresses from 0 (baseAddress not involved).
+  // The first definition of a label wins.
   const labels: Record<string, number> = {};
+  const define = (table: Record<string, number>, name: string, at: number) => {
+    if (!Object.prototype.hasOwnProperty.call(table, name)) table[name] = at;
+  };
   let addr = 0;
-  let prevLabel: string | null = null;
-  for (const { label, parsed } of parsedLines) {
-    if (label !== null && label !== prevLabel) {
-      labels[label] = addr;
-      prevLabel = label;
-    }
+  for (const { labels: lineLabels, parsed } of parsedLines) {
+    for (const name of lineLabels) define(labels, name, addr);
     addr += worstCaseSize(parsed) * 4;
   }
+  // Trailing labels point just past the last instruction.
+  for (const name of trailingLabels) define(labels, name, addr);
 
   // ── Pass 2: assemble with known labels, compute real section-relative addrs
   const sourceInstrs: SourceInstr[] = [];
   const addrToSourceIdx = new Map<number, number>();
   addr = 0;
 
-  for (const { label, raw, parsed } of parsedLines) {
-    const assembled = assembleInstr(parsed, addr, labels, raw, label);
+  for (const { labels: lineLabels, raw, parsed } of parsedLines) {
+    const assembled = assembleInstr(
+      parsed, addr, labels, raw, lineLabels.length ? lineLabels.join(", ") : null,
+    );
     if (assembled instanceof AppError) return assembled;
     const firstAddr = addr;
     const concretes: Instr[] = [];
@@ -247,14 +268,15 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
       concretes.push(spec);
       addr += 4;
     }
-    sourceInstrs.push({ label, raw, parsed, concretes, firstAddr });
+    sourceInstrs.push({ labels: lineLabels, raw, parsed, concretes, firstAddr });
   }
 
   // Build real section-relative label addresses from actual pass-2 positions.
   const realLabels: Record<string, number> = {};
   for (const si of sourceInstrs) {
-    if (si.label !== null && !(si.label in realLabels)) realLabels[si.label] = si.firstAddr;
+    for (const name of si.labels) define(realLabels, name, si.firstAddr);
   }
+  for (const name of trailingLabels) define(realLabels, name, addr);
 
   // Fixup jump/branch targets using real section-relative addresses.
   // si.firstAddr is the address of concretes[0]; concretes[1] is at +4.
@@ -310,6 +332,7 @@ export function assembleProgram(prog: Program): AssemblyResult | AppError {
     sourceInstrs,
     addrToSourceIdx: absAddrToSourceIdx,
     labels: realLabels,
+    trailingLabels,
   };
 }
 

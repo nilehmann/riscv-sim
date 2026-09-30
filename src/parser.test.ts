@@ -264,3 +264,74 @@ describe("unknown opcode", () => {
   test("errors on unknown mnemonic", () => err("foobar a0, a1"));
   test("errors on pure comment line", () => err("# just a comment"));
 });
+
+// ─── Undefined labels ─────────────────────────────────────────────────────────
+
+describe("undefined labels", () => {
+  const asm = (assembly: string) =>
+    assembleProgram({ name: "t", initialRegs: {}, baseAddress: 0x8000, assembly });
+
+  test.each([
+    "beq a0, a1, nowhere",
+    "beqz a0, nowhere",
+    "bgt a0, a1, nowhere",
+    "j nowhere",
+    "jal ra, nowhere",
+    "call nowhere",
+  ])("%s is an error", (line) => {
+    const r = asm(`start:\n  ${line}`);
+    expect(r).toBeInstanceOf(AppError);
+    expect((r as AppError).message).toBe("Undefined label 'nowhere'");
+  });
+
+  test("inherited object keys are not labels", () => {
+    expect(asm("start:\n  j toString")).toBeInstanceOf(AppError);
+  });
+
+  test("defined labels still resolve", () => {
+    expect(asm("start:\n  j start")).not.toBeInstanceOf(AppError);
+  });
+});
+
+// ─── Label placement ──────────────────────────────────────────────────────────
+
+describe("label placement", () => {
+  const asm = (assembly: string) => {
+    const r = assembleProgram({ name: "t", initialRegs: {}, baseAddress: 0x8000, assembly });
+    if (r instanceof AppError) throw r;
+    return r;
+  };
+
+  test("trailing label points just past the last instruction", () => {
+    const r = asm("start:\n  nop\n  li a0, 5000\nend:");
+    // nop (4 bytes) + li as lui+addi (8 bytes)
+    expect(r.labels["end"]).toBe(0x8000 + 12);
+    expect(r.trailingLabels).toEqual(["end"]);
+  });
+
+  test("jumping to a trailing label ends the program", () => {
+    const prog: Program = {
+      name: "t", initialRegs: {}, baseAddress: 0x8000,
+      assembly: "  j end\n  li a0, 1\nend:",
+    };
+    const { steps } = simulate(prog, asm(prog.assembly));
+    expect(steps).toHaveLength(2); // initial state + the jump
+    expect(steps[1]!.nextAddr).toBe(0x8000 + 8);
+    expect(steps[1]!.regs.a0).not.toBe(1);
+  });
+
+  test("consecutive labels all point to the next instruction", () => {
+    const r = asm("a:\nb:\n  nop\nc:\n  nop");
+    expect(r.labels).toEqual({ a: 0x8000, b: 0x8000, c: 0x8004 });
+    expect(r.sourceInstrs[0]!.labels).toEqual(["a", "b"]);
+    expect(r.sourceInstrs[1]!.labels).toEqual(["c"]);
+  });
+
+  test("branch to an earlier label of a stacked pair", () => {
+    expect(asm("a:\nb:\n  beq a0, a1, a\n  j b")).toBeTruthy();
+  });
+
+  test("duplicate label keeps the first definition", () => {
+    expect(asm("x:\n  nop\nx:\n  nop").labels["x"]).toBe(0x8000);
+  });
+});

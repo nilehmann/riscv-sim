@@ -18,7 +18,9 @@ export function inferDisplayState(
 
   const nonLocalLabelAddrs = new Map<number, string>();
   for (const [name, addr] of Object.entries(labels)) {
-    if (!name.startsWith(".")) nonLocalLabelAddrs.set(addr, name);
+    // Several labels can share an address; keep the first one in the source.
+    if (!name.startsWith(".") && !nonLocalLabelAddrs.has(addr))
+      nonLocalLabelAddrs.set(addr, name);
   }
 
   const callStack: FrameInfo[] = [

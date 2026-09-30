@@ -225,22 +225,29 @@ export function parseInstr(raw: string): ParsedInstr | AppError {
 
 // ─── Program parser ───────────────────────────────────────────────────────────
 
-export type ParsedLine = { label: string | null; raw: string; parsed: ParsedInstr };
+export type ParsedLine = { labels: string[]; raw: string; parsed: ParsedInstr };
 
-export function parseProgram(prog: Program): ParsedLine[] | AppError {
-  const parsedLines: ParsedLine[] = [];
-  let currentLabel: string | null = null;
+export type ParsedProgram = {
+  lines: ParsedLine[];
+  /** Labels with no instruction after them. */
+  trailingLabels: string[];
+};
+
+export function parseProgram(prog: Program): ParsedProgram | AppError {
+  const lines: ParsedLine[] = [];
+  // Consecutive labels all attach to the next instruction.
+  let pending: string[] = [];
   for (const rawLine of prog.assembly.split("\n")) {
     const line = rawLine.trim();
     if (!line || line.startsWith("#")) continue;
     if (line.endsWith(":")) {
-      currentLabel = line.slice(0, -1).trim();
+      pending.push(line.slice(0, -1).trim());
       continue;
     }
     const parsed = parseInstr(line);
     if (parsed instanceof AppError) return parsed;
-    parsedLines.push({ label: currentLabel, raw: line, parsed });
-    currentLabel = null;
+    lines.push({ labels: pending, raw: line, parsed });
+    pending = [];
   }
-  return parsedLines;
+  return { lines, trailingLabels: pending };
 }
