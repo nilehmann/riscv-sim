@@ -6,19 +6,24 @@ const reg = (r: string): Token => ({ kind: "reg", text: r });
 const imm = (t: string | number): Token => ({ kind: "imm", text: String(t) });
 const punct = (t: string): Token => ({ kind: "punct", text: t });
 const sep = (): Token => punct(", ");
-const rel = (off: number): Token => imm(`${off >= 0 ? "+" : ""}${off}`);
+/** PC-relative offset of a jump or branch at addr, linked to its target. */
+const rel = (off: number, addr: number): Token => ({
+  kind: "label",
+  text: `${off >= 0 ? "+" : ""}${off}`,
+  addr: addr + off,
+});
 const mem = (off: Token, base: string): Token[] => [off, punct("("), reg(base), punct(")")];
 
 // ─── Machine instructions ─────────────────────────────────────────────────
 // Branch and jump targets are shown as PC-relative offsets, as encoded.
 
-export function tokens(c: Instr): Token[] {
+export function tokens(c: Instr, addr: number): Token[] {
   const ops = ((): Token[] => {
     switch (c.op) {
       case "jalr":
         return [reg(c.rd), sep(), ...mem(imm(c.imm), c.rs1)];
       case "jal":
-        return [reg(c.rd), sep(), rel(c.target)];
+        return [reg(c.rd), sep(), rel(c.target, addr)];
       case "lui":
       case "auipc":
         return [reg(c.rd), sep(), imm(c.imm)];
@@ -33,7 +38,7 @@ export function tokens(c: Instr): Token[] {
       case "lw": case "lh": case "lb": case "lhu": case "lbu":
         return [reg(c.rd), sep(), ...mem(imm(c.offset), c.rs1)];
       case "beq": case "bne": case "blt": case "bge": case "bltu": case "bgeu":
-        return [reg(c.rs1), sep(), reg(c.rs2), sep(), rel(c.target)];
+        return [reg(c.rs1), sep(), reg(c.rs2), sep(), rel(c.target, addr)];
     }
   })();
   return [kw(c.op), punct(" "), ...ops];
