@@ -140,8 +140,5 @@
     "SF": "Sign flag: el resultado fue negativo",
     "CF": "Carry flag: overflow sin signo",
     "OF": "Overflow flag: overflow con signo"
-  },
-  "app": {
-    "title": "Simulador {isa}"
   }
 }

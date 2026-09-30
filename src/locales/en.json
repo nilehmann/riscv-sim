@@ -140,8 +140,5 @@
     "SF": "Sign flag: the result was negative",
     "CF": "Carry flag: unsigned overflow",
     "OF": "Overflow flag: signed overflow"
-  },
-  "app": {
-    "title": "{isa} Simulator"
   }
 }

@@ -165,7 +165,7 @@
 
 <!-- App layout -->
 <header class="app-header">
-    <span class="app-title">{$_('app.title', { values: { isa: sim.isa.shortName } })}</span>
+    <span class="app-title">Frame by Frame <span class="app-isa">{sim.isa.shortName}</span></span>
     <button class="settings-btn" onclick={() => (ui.showSettings = true)} data-tooltip={$_('settings.tooltip')}>⚙</button>
 </header>
 
@@ -222,6 +222,17 @@
         color: var(--text-dim);
         letter-spacing: 0.03em;
         flex: 1;
+    }
+    .app-isa {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--text-faint);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1px 8px;
+        margin-left: 6px;
+        letter-spacing: 0;
     }
     .settings-btn {
         background: none;
