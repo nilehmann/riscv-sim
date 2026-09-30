@@ -89,7 +89,7 @@ export function execute(m: Machine, c: Instr, addr: number): ExecResult {
       if (!m.checkAccess(a)) return { next, fault: { type: "segfault", addr: a } };
       m.writeMem(a, r(c.rs2), STORE_SIZE[c.op]);
       const slot = wordOf(a);
-      return { next, hiSlots: [slot], store: { addr: slot, reg: c.rs2 } };
+      return { next, hiSlots: [slot], store: { addr: slot, reg: c.rs2, size: 4 } };
     }
 
     case "lw": case "lh": case "lb": case "lhu": case "lbu": {

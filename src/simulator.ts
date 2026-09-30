@@ -12,7 +12,7 @@ export function simulate(
 ): SimulateResult {
   const { sourceInstrs, addrToSourceIdx, labels } = assembled;
 
-  const stackBase = prog.stackBase ?? 0xc0000000;
+  const stackBase = prog.stackBase ?? isa.defaults.stackBase;
   const osMode = prog.osMode !== false;
   const machine = new Machine(isa, prog.initialRegs, stackBase, osMode);
 
@@ -26,7 +26,9 @@ export function simulate(
     }
   }
 
+  isa.setup?.(machine, prog);
   const initialReturnAddr = isa.initialReturnAddr(machine);
+  const initialSlotLabels = isa.initialSlotLabels?.(machine) ?? [];
   let pc = prog.entryPoint ? labels[prog.entryPoint]! : prog.baseAddress;
 
   const steps: Step[] = [];
@@ -51,7 +53,7 @@ export function simulate(
       const r = isa.execute(machine, c.instr, c.addr, c.size);
       if (r.fault) {
         pushStep({ aHl: [c.addr], nextAddr: null, fault: r.fault });
-        return { steps, sourceToConcrete, initialReturnAddr };
+        return { steps, sourceToConcrete, initialReturnAddr, initialSlotLabels };
       }
       pc = r.next;
       pushStep({
@@ -66,5 +68,5 @@ export function simulate(
     sourceToConcrete.push(steps.length - 1);
   }
 
-  return { steps, sourceToConcrete, initialReturnAddr };
+  return { steps, sourceToConcrete, initialReturnAddr, initialSlotLabels };
 }

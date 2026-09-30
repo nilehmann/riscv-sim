@@ -2,9 +2,16 @@
     import type { Program } from "./types";
     import { PROGRAMS } from "./programs";
     import { sim, ui } from "./state.svelte";
+    import { getIsa, ISA_IDS } from "./isa";
     import { _ } from "svelte-i18n";
 
     let selectedProgram = $state<Program>(PROGRAMS[0]!);
+
+    // Programs grouped by instruction set, in registry order.
+    const groups = ISA_IDS.map((id) => ({
+        isa: getIsa(id),
+        programs: PROGRAMS.filter((p) => (p.isa ?? "rv32") === id),
+    })).filter((g) => g.programs.length > 0);
     let barEl = $state<HTMLElement | null>(null);
     let scrubbing = $state(false);
 
@@ -90,16 +97,21 @@
             class:open={ui.selectorOpen}
             role="listbox"
         >
-            {#each PROGRAMS as prog}
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                <!-- svelte-ignore a11y_click_events_have_key_events -->
-                <li
-                    role="option"
-                    aria-selected={false}
-                    onclick={() => selectProgram(prog)}
-                >
-                    {prog.name}
-                </li>
+            {#each groups as group}
+                {#if groups.length > 1}
+                    <li class="group-title" role="presentation">{group.isa.shortName}</li>
+                {/if}
+                {#each group.programs as prog}
+                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <li
+                        role="option"
+                        aria-selected={false}
+                        onclick={() => selectProgram(prog)}
+                    >
+                        {prog.name}
+                    </li>
+                {/each}
             {/each}
         </ul>
     </div>
@@ -304,5 +316,16 @@
     }
     .custom-select-list li:hover {
         background: var(--surface);
+    }
+    .custom-select-list li.group-title {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+        padding: 8px 16px 2px;
+        cursor: default;
+    }
+    .custom-select-list li.group-title:hover {
+        background: none;
     }
 </style>

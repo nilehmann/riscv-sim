@@ -12,13 +12,15 @@
     "show_expansion": "Mostrar instrucciones ensambladas"
   },
   "register_panel": {
-    "title": "Registros"
+    "title": "Registros",
+    "sub_reg": "Escrito como {sub}, la parte baja de {reg}"
   },
   "stack": {
     "high_address": "dirección alta",
     "low_address": "dirección baja",
     "error_title": "Error",
-    "non_stack_title": "Comportamiento no estándar de pila detectado"
+    "non_stack_title": "Comportamiento no estándar de pila detectado",
+    "red_zone": "zona roja"
   },
   "hex_value": {
     "unsigned": "sin signo",
@@ -48,7 +50,7 @@
     "initial_registers": "Registros iniciales",
     "show_stack": "Mostrar pila",
     "stack_base": "Base de pila",
-    "stack_pointer": "Puntero de pila (sp)",
+    "stack_pointer": "Puntero de pila ({sp})",
     "memory_regions": "Regiones de memoria",
     "cancel": "Cancelar",
     "load": "Cargar",
@@ -66,7 +68,11 @@
     "err_stack_pointer": "Valor de puntero de pila inválido",
     "err_reg_value": "Valor inválido para {reg}",
     "err_region_address": "Región {n}: dirección inválida",
-    "err_region_element": "Región {n}, elemento {ei}: valor inválido"
+    "err_region_element": "Región {n}, elemento {ei}: valor inválido",
+    "isa": "Arquitectura",
+    "return_address": "Dirección de retorno",
+    "placeholder_return": "opcional — basura si está vacío",
+    "err_return_address": "Dirección de retorno inválida"
   },
   "reg": {
     "pc": "contador de programa",
@@ -101,7 +107,24 @@
     "t3": "temporal",
     "t4": "temporal",
     "t5": "temporal",
-    "t6": "temporal"
+    "t6": "temporal",
+    "rax": "valor de retorno",
+    "rbx": "callee-saved",
+    "rcx": "arg 4",
+    "rdx": "arg 3",
+    "rsi": "arg 2",
+    "rdi": "arg 1",
+    "rbp": "frame pointer",
+    "rsp": "stack pointer",
+    "r8": "arg 5",
+    "r9": "arg 6",
+    "r10": "temporal",
+    "r11": "temporal",
+    "r12": "callee-saved",
+    "r13": "callee-saved",
+    "r14": "callee-saved",
+    "r15": "callee-saved",
+    "flags": "flags"
   },
   "encoding": {
     "format": "tipo {format}",
@@ -109,6 +132,16 @@
     "expanded_from": "expandido de",
     "show": "Mostrar codificación",
     "pin_hint": "Clic en ⓘ para fijar",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "bits_of": "bits de {part}"
+  },
+  "flag": {
+    "ZF": "Zero flag: el resultado fue cero",
+    "SF": "Sign flag: el resultado fue negativo",
+    "CF": "Carry flag: overflow sin signo",
+    "OF": "Overflow flag: overflow con signo"
+  },
+  "app": {
+    "title": "Simulador {isa}"
   }
 }

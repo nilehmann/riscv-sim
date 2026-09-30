@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Concrete, SourceInstr } from "./types";
   import type { BitField, EncodingPart } from "./isa/types";
-  import { hx } from "./types";
+  import { fmtAddr } from "./types";
   import { sim } from "./state.svelte";
   import Tokens from "./Tokens.svelte";
   import Popover from "./Popover.svelte";
@@ -31,12 +31,19 @@
   const addr = $derived(concrete.addr);
   const enc = $derived(sim.isa.encode(concrete.instr));
   const bitParts = $derived(enc.parts.filter((p) => p.fields));
-  const allFields = $derived(enc.parts.flatMap((p) => p.fields ?? []));
+  // Several parts (x86: prefix, opcode, ModRM, …) get a byte strip on top.
+  const multi = $derived(enc.parts.length > 1);
 
   // Cross-highlighting between bytes, bits, fields and immediate pieces.
   // hoverByte is the byte's offset from the instruction address.
   let hoverField = $state<string | null>(null);
   let hoverByte = $state<number | null>(null);
+  let hoverPart = $state<string | null>(null);
+
+  /** Hover key of a field: field names repeat across parts. */
+  const fkey = (p: EncodingPart, f: BitField) => (multi ? `${p.name}.${f.name}` : f.name);
+  const partKind = (p: EncodingPart) => p.kind ?? "funct";
+  const partBytes = (p: EncodingPart) => enc.bytes.slice(p.offset, p.offset + p.length);
 
   const width = (p: EncodingPart) => p.length * 8;
   /** Bit numbers of a part, MSB first. */
@@ -90,68 +97,115 @@
     </div>
   {/if}
 
-  {#each bitParts as part}
-    <div class="enc-grid" style="grid-template-columns: repeat({width(part)}, {BIT_COL_PX}px)">
-      <!-- Bytes in memory: highest address on the left so bits read MSB→LSB -->
-      {#each bytesOf(part) as k, i}
-        <span
-          class="byte-addr"
-          class:hover={hoverByte === k}
-          style="grid-row:1; grid-column:{i * 8 + 1} / span 8"
-        >{hx(addr + k)}</span>
-        <span
-          class="byte-val"
-          class:hover={hoverByte === k}
-          style="grid-row:2; grid-column:{i * 8 + 1} / span 8"
+  {#if multi}
+    <!-- Byte strip: the parts of the instruction in memory order -->
+    <div class="enc-strip">
+      {#each enc.parts as part}
+        <div
+          class="strip-part k-{partKind(part)}"
+          class:hover={hoverPart === part.name}
           role="presentation"
-          onmouseenter={() => (hoverByte = k)}
-          onmouseleave={() => (hoverByte = null)}
-        >{hexByte(enc.bytes[k]!)}</span>
-      {/each}
-
-      <!-- The bits, colored by field -->
-      {#each bitsOf(part) as bit}
-        {@const f = fieldOf(part, bit)}
-        <span
-          class="bit k-{f.kind}"
-          class:fstart={bit === f.hi}
-          class:hover={hoverField === f.name || hoverByte === part.offset + (bit >> 3)}
-          style="grid-row:3; grid-column:{bitCol(part, bit)}"
-          data-tooltip="bit {bit}"
-          role="presentation"
-          onmouseenter={() => (hoverField = f.name)}
-          onmouseleave={() => (hoverField = null)}
-        >{bitValue(part, bit)}</span>
-      {/each}
-
-      <!-- Field brackets and names -->
-      {#each part.fields! as f}
-        <span
-          class="field-name k-{f.kind}"
-          class:hover={hoverField === f.name}
-          style="grid-row:4; grid-column:{bitCol(part, f.hi)} / span {span(f)}"
-          role="presentation"
-          onmouseenter={() => (hoverField = f.name)}
-          onmouseleave={() => (hoverField = null)}
-        >{fitsLabel(f) ? f.name : ""}</span>
+          onmouseenter={() => (hoverPart = part.name)}
+          onmouseleave={() => (hoverPart = null)}
+        >
+          <span class="strip-bytes">
+            {#each partBytes(part) as b, i}
+              <span class:hover={hoverByte === part.offset + i}>{hexByte(b)}</span>
+            {/each}
+          </span>
+          <span class="strip-name">{part.name}</span>
+        </div>
       {/each}
     </div>
-  {/each}
+  {/if}
 
-  <!-- One row per field, same order as the bits -->
-  <div class="enc-table">
-    {#each allFields as f}
-      <div
-        class="enc-row"
-        class:hover={hoverField === f.name}
-        role="presentation"
-        onmouseenter={() => (hoverField = f.name)}
-        onmouseleave={() => (hoverField = null)}
-      >
-        <span class="t-name k-{f.kind}">{f.name}</span>
-        <span class="t-bits">{bin(f.value, span(f))}</span>
-        <span class="t-note">{f.note}</span>
+  <div class="enc-grids">
+    {#each bitParts as part}
+      <div class="enc-grid-box" class:hover={hoverPart === part.name}>
+        {#if multi}
+          <span class="grid-title">{$_("encoding.bits_of", { values: { part: part.name } })}</span>
+        {/if}
+        <div class="enc-grid" style="grid-template-columns: repeat({width(part)}, {BIT_COL_PX}px)">
+          <!-- Bytes in memory: highest address on the left so bits read MSB→LSB -->
+          {#each bytesOf(part) as k, i}
+            {#if !multi}
+              <span
+                class="byte-addr"
+                class:hover={hoverByte === k}
+                style="grid-row:1; grid-column:{i * 8 + 1} / span 8"
+              >{fmtAddr(addr + k)}</span>
+            {/if}
+            <span
+              class="byte-val"
+              class:hover={hoverByte === k}
+              style="grid-row:2; grid-column:{i * 8 + 1} / span 8"
+              role="presentation"
+              onmouseenter={() => (hoverByte = k)}
+              onmouseleave={() => (hoverByte = null)}
+            >{hexByte(enc.bytes[k]!)}</span>
+          {/each}
+
+          <!-- The bits, colored by field -->
+          {#each bitsOf(part) as bit}
+            {@const f = fieldOf(part, bit)}
+            <span
+              class="bit k-{f.kind}"
+              class:fstart={bit === f.hi}
+              class:hover={hoverField === fkey(part, f) || hoverByte === part.offset + (bit >> 3)}
+              style="grid-row:3; grid-column:{bitCol(part, bit)}"
+              data-tooltip="bit {bit}"
+              role="presentation"
+              onmouseenter={() => (hoverField = fkey(part, f))}
+              onmouseleave={() => (hoverField = null)}
+            >{bitValue(part, bit)}</span>
+          {/each}
+
+          <!-- Field brackets and names -->
+          {#each part.fields! as f}
+            <span
+              class="field-name k-{f.kind}"
+              class:hover={hoverField === fkey(part, f)}
+              style="grid-row:4; grid-column:{bitCol(part, f.hi)} / span {span(f)}"
+              role="presentation"
+              onmouseenter={() => (hoverField = fkey(part, f))}
+              onmouseleave={() => (hoverField = null)}
+            >{fitsLabel(f) ? f.name : ""}</span>
+          {/each}
+        </div>
       </div>
+    {/each}
+  </div>
+
+  <!-- One row per field (or per part without fields), in memory order -->
+  <div class="enc-table">
+    {#each enc.parts as part}
+      {#if part.fields}
+        {#each part.fields as f}
+          <div
+            class="enc-row"
+            class:hover={hoverField === fkey(part, f) || hoverPart === part.name}
+            role="presentation"
+            onmouseenter={() => (hoverField = fkey(part, f))}
+            onmouseleave={() => (hoverField = null)}
+          >
+            <span class="t-name k-{f.kind}">{f.name === part.name ? f.name : fkey(part, f)}</span>
+            <span class="t-bits">{bin(f.value, span(f))}</span>
+            <span class="t-note">{f.note}</span>
+          </div>
+        {/each}
+      {:else}
+        <div
+          class="enc-row"
+          class:hover={hoverPart === part.name}
+          role="presentation"
+          onmouseenter={() => (hoverPart = part.name)}
+          onmouseleave={() => (hoverPart = null)}
+        >
+          <span class="t-name k-{partKind(part)}">{part.name}</span>
+          <span class="t-bits">{partBytes(part).map(hexByte).join(" ")}</span>
+          <span class="t-note">{part.note ?? ""}</span>
+        </div>
+      {/if}
     {/each}
   </div>
 
@@ -219,6 +273,57 @@
     color: var(--text);
   }
 
+  .enc-strip {
+    display: flex;
+    gap: 4px;
+    font-size: 16px;
+  }
+  .strip-part {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 8px 2px;
+    background: var(--k-dim);
+    border-bottom: 2px solid var(--k);
+    cursor: default;
+  }
+  .strip-part.hover {
+    outline: 1px solid var(--k);
+  }
+  .strip-bytes {
+    display: flex;
+    gap: 6px;
+    color: var(--text);
+  }
+  .strip-bytes .hover {
+    color: var(--blue);
+  }
+  .strip-name {
+    font-size: 12px;
+    color: var(--k);
+    white-space: nowrap;
+  }
+  .enc-grids {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .enc-grids:empty {
+    display: none;
+  }
+  .enc-grid-box {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .grid-title {
+    font-size: 12px;
+    color: var(--text-faint);
+  }
+  .enc-grid-box.hover .grid-title {
+    color: var(--text);
+  }
   .enc-grid {
     display: grid;
     row-gap: 2px;

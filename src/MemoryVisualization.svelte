@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { MemoryRegion } from "./types";
   import { sim, ui } from "./state.svelte";
-  import { hx } from "./types";
+  import { fmtAddr } from "./types";
   import { subSlots, readBytes } from "./memUtils";
   import HexValue from "./HexValue.svelte";
   import SlotMode from "./SlotMode.svelte";
@@ -16,11 +16,11 @@
     return readBytes(sim.currentStep?.mem ?? new Map(), addr, region.elementSize);
   }
 
-  function slotMode(key: string, def: 'word' | 'halfword' | 'byte'): 'word' | 'halfword' | 'byte' {
+  function slotMode(key: string, def: number): number {
     return ui.slotViewMode.get(key) ?? def;
   }
 
-  function setSlotMode(key: string, mode: 'word' | 'halfword' | 'byte') {
+  function setSlotMode(key: string, mode: number) {
     const next = new Map(ui.slotViewMode);
     next.set(key, mode);
     ui.slotViewMode = next;
@@ -36,15 +36,15 @@
             {@const elemAddr = region.addr + i * region.elementSize}
             {@const nativeSize = region.elementSize}
             {@const key = `mem-${region.addr}-${i}`}
-            {@const defaultMode = nativeSize === 4 ? 'word' : nativeSize === 2 ? 'halfword' : 'byte'}
+            {@const defaultMode = nativeSize}
             {@const mode = slotMode(key, defaultMode)}
             <div class="region-slot" class:hi={isHighlighted(elemAddr)}>
               {#if mode === defaultMode}
                 <div class="slot-meta">
                   {#if nativeSize > 1}
-                    <SlotMode {mode} showWord={nativeSize === 4} onchange={(m) => setSlotMode(key, m)} />
+                    <SlotMode {mode} size={nativeSize} onchange={(m) => setSlotMode(key, m)} />
                   {/if}
-                  <span class="slot-addr">{hx(elemAddr)}</span>
+                  <span class="slot-addr">{fmtAddr(elemAddr)}</span>
                   <span class="slot-idx">[{i}]</span>
                 </div>
                 <div class="word-val">
@@ -53,11 +53,11 @@
               {:else}
                 <div class="slot-expanded">
                   {#if nativeSize > 1}
-                    <SlotMode {mode} showWord={nativeSize === 4} onchange={(m) => setSlotMode(key, m)} />
+                    <SlotMode {mode} size={nativeSize} onchange={(m) => setSlotMode(key, m)} />
                   {/if}
                   <div class="pairs-grid">
-                    {#each subSlots(elemAddr, nativeSize, mode) as sub}
-                      <span class="sub-grid-addr">{hx(sub.addr)}</span>
+                    {#each subSlots(elemAddr, nativeSize, mode as 1 | 2) as sub}
+                      <span class="sub-grid-addr">{fmtAddr(sub.addr)}</span>
                       <div class="val-cell">
                         <HexValue
                           value={readBytes(sim.currentStep?.mem ?? new Map(), sub.addr, sub.size)}

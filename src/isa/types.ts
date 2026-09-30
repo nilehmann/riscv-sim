@@ -1,7 +1,7 @@
-import type { AppError } from "../types";
+import type { AppError, Program } from "../types";
 import type { Machine } from "../machine";
 
-export type IsaId = "rv32";
+export type IsaId = "rv32" | "x86";
 
 // ─── Display ──────────────────────────────────────────────────────────────
 
@@ -34,6 +34,10 @@ export interface EncodingPart {
   /** First byte of the part, relative to the instruction address. */
   offset: number;
   length: number;
+  /** Color of a part that has no bit fields. */
+  kind?: FieldKind;
+  /** Human meaning of a part that has no bit fields. */
+  note?: string;
   /** Bit-level breakdown, MSB first, covering every bit of the part. */
   fields?: BitField[];
 }
@@ -67,10 +71,20 @@ export interface ExecResult {
   next: number;
   hiReg?: string[];
   hiSlots?: number[];
-  store?: { addr: number; reg: string };
-  fault?: { type: "segfault"; addr: number };
+  store?: StoreInfo;
+  fault?: Fault;
   control?: ControlFlow;
 }
+
+/** A register (or other named value) written to memory, for slot labels. */
+export interface StoreInfo {
+  addr: number;
+  reg: string;
+  /** Bytes written. */
+  size: number;
+}
+
+export type Fault = { type: "segfault"; addr: number } | { type: "divide" };
 
 // ─── ISA ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +104,8 @@ export interface ExpandCtx {
 export interface Isa<P = any, I = any> {
   id: IsaId;
   name: string;
+  /** Short name for titles and selectors, e.g. "RISC-V". */
+  shortName: string;
   /** Register width in bytes. */
   wordBytes: 4 | 8;
   /** Stack slot size in bytes for the stack view. */
@@ -107,13 +123,28 @@ export interface Isa<P = any, I = any> {
     returnAddr: string | null;
     /** Alternative names → canonical name. */
     aliases: Record<string, string>;
+    /** Name of the program counter. */
+    pc: string;
+    /**
+     * Width in bytes of registers that are a narrower view of a canonical
+     * one (x86 eax → 4). Such names may appear in ExecResult.hiReg.
+     */
+    subRegBytes?: Record<string, number>;
   };
+  /** Status flags kept in a pseudo-register, shown one by one. */
+  flags?: { reg: string; bits: { name: string; bit: number }[] };
+  /** Bytes below sp that may be accessed without moving sp. */
+  redZone: number;
+  /** Letter for each access size in bytes, e.g. { 4: "w", 2: "h", 1: "b" }. */
+  sizeNames: Record<number, string>;
+  /** Defaults for new programs. */
+  defaults: { baseAddress: number; stackBase: number; sp: number };
   /** Starts a line comment. */
   lineComment: string;
 
   parseInstr(raw: string): P | AppError;
-  /** Upper bound on the encoded size in bytes, for the initial layout. */
-  maxSize(p: P): number;
+  /** Smallest possible encoded size in bytes, for the initial layout. */
+  minSize(p: P): number;
   /** Machine instructions for p when placed at ctx.addr. */
   expand(p: P, ctx: ExpandCtx): I[] | AppError;
   size(i: I): number;
@@ -131,6 +162,10 @@ export interface Isa<P = any, I = any> {
   garbage(seed: number): I;
   /** Where the entry function returns to, given the initial machine state. */
   initialReturnAddr(m: Machine): number | null;
+  /** Prepares the machine before the first instruction (optional). */
+  setup?(m: Machine, prog: Program): void;
+  /** Stack slots that have a known meaning before the program starts. */
+  initialSlotLabels?(m: Machine): StoreInfo[];
 
   editor: { mnemonics: ReadonlySet<string> };
 }

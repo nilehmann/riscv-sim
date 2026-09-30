@@ -1,7 +1,8 @@
 <script lang="ts">
+    import type { SlotLabel } from "./types";
     import { sim, ui } from "./state.svelte";
     import { subSlots, readWritten } from "./memUtils";
-    import { hx } from "./types";
+    import { fmtAddr } from "./types";
     import HexValue from "./HexValue.svelte";
     import SlotMode from "./SlotMode.svelte";
 
@@ -11,7 +12,7 @@
         mode,
         memVal,
         gWord,
-        label = null,
+        labels = null,
         faint = false,
         disabled = false,
         onModeChange,
@@ -19,31 +20,36 @@
         addr: number;
         /** Slot size in bytes. */
         size: 4 | 8;
-        mode: 'word' | 'halfword' | 'byte';
+        /** Size in bytes of the pieces the slot is shown as (`size` = whole). */
+        mode: number;
         memVal: bigint | undefined;
         gWord: bigint;
-        label?: string | null;
+        /** What memory holds, by address; pieces of a slot can have their own. */
+        labels?: Map<number, SlotLabel> | null;
         faint?: boolean;
         disabled?: boolean;
-        onModeChange: (m: 'word' | 'halfword' | 'byte') => void;
+        onModeChange: (m: number) => void;
     } = $props();
 
     const step = $derived(sim.currentStep);
+    const name = (a: number) => {
+        const label = labels?.get(a)?.name;
+        return label ? `${fmtAddr(a)}  ${label}` : fmtAddr(a);
+    };
 </script>
 
 <div class="slot-header">
-    <SlotMode {mode} {disabled} transparent onchange={onModeChange} />
-    {#if mode === 'word'}
-        <span class="slot-name">{label ? `${hx(addr)}  ${label}` : hx(addr)}</span>
+    <SlotMode {mode} {size} {disabled} transparent onchange={onModeChange} />
+    {#if mode === size}
+        <span class="slot-name">{name(addr)}</span>
     {:else}
         <div class="sub-slots-col">
-            {#each subSlots(addr, size, mode).toReversed() as sub, si}
+            {#each subSlots(addr, size, mode as 1 | 2 | 4).toReversed() as sub}
                 {@const subVal = step ? readWritten(step.mem, sub.addr, sub.size) : undefined}
-                {@const subLabel = si === 0 ? label : null}
                 {@const byteOff = sub.addr - addr}
                 {@const subGarbage = BigInt.asUintN(sub.size * 8, gWord >> BigInt(byteOff * 8))}
                 <div class="sub-slot" data-addr={sub.addr}>
-                    <span class="slot-name">{subLabel ? `${hx(sub.addr)}  ${subLabel}` : hx(sub.addr)}</span>
+                    <span class="slot-name">{name(sub.addr)}</span>
                     {#if subVal !== undefined}
                         <HexValue value={subVal} elementSize={sub.size} faint={faint} />
                     {:else if ui.showGarbage}
@@ -56,7 +62,7 @@
         </div>
     {/if}
 </div>
-{#if mode === 'word'}
+{#if mode === size}
     {#if memVal !== undefined}
         <HexValue value={memVal} elementSize={size} {faint} />
     {:else if ui.showGarbage}

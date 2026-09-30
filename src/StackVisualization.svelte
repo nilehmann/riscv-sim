@@ -45,10 +45,19 @@
         })),
     );
 
-    // Ghost rows below (free zone)
+    // Red zone: slots below sp the top frame has stored to without moving sp.
+    const redZoneRows = $derived.by(() => {
+        const low = sim.currentCallFrames.at(-1)?.lowWrite;
+        if (low == null || low >= currentSp) return [];
+        const count = Math.ceil((currentSp - low) / S);
+        return Array.from({ length: count }, (_, i) => currentSp - (i + 1) * S);
+    });
+
+    // Ghost rows below (free zone). Once the entry function has returned, sp is
+    // above the caller rows, which already cover the slots down to callerBase.
     const freeGhostRows = $derived(
         Array.from({ length: GHOST_ROWS }, (_, i) => ({
-            addr: currentSp - (i + 1) * S,
+            addr: Math.min(currentSp, callerBase) - (redZoneRows.length + i + 1) * S,
             opacity: ((GHOST_ROWS - i) / (GHOST_ROWS + 1)).toFixed(2),
         })),
     );
@@ -59,24 +68,34 @@
     let spArrowEl = $state<HTMLElement | null>(null);
     let fpArrowEl = $state<HTMLElement | null>(null);
     let labelsEl = $state<HTMLElement | null>(null);
+    let redZoneEl = $state<HTMLElement | null>(null);
     let offsetsEl = $state<HTMLElement | null>(null);
 
-    // slot-addr → element: populated by bind:this on each slot div
-    let slotEls = $state<Map<number, HTMLElement>>(new Map());
+    // slot-addr → element, kept up to date by registerSlotAction. A plain map
+    // mutated in place: copying reactive state on every change loses updates,
+    // because a teardown (destroy) reads the state as it was before the batch.
+    const slotEls = new Map<number, HTMLElement>();
+    // Bumped whenever slotEls changes, to re-run the positioning effect.
+    let slotsVersion = $state(0);
+    let slotChanges = 0;
+    const slotsChanged = () => (slotsVersion = ++slotChanges);
 
     // Svelte action that registers slot elements into slotEls map
     function registerSlotAction(el: HTMLElement, addr: number) {
-        slotEls = new Map(slotEls).set(addr, el);
+        slotEls.set(addr, el);
+        slotsChanged();
         return {
+            // Another row may already have taken over this one's old address,
+            // so only remove the entry if it is still ours.
             update(newAddr: number) {
-                slotEls = new Map(slotEls);
-                slotEls.delete(addr);
+                if (slotEls.get(addr) === el) slotEls.delete(addr);
                 slotEls.set(newAddr, el);
                 addr = newAddr;
+                slotsChanged();
             },
             destroy() {
-                slotEls = new Map(slotEls);
-                slotEls.delete(addr);
+                if (slotEls.get(addr) === el) slotEls.delete(addr);
+                slotsChanged();
             },
         };
     }
@@ -90,7 +109,9 @@
         const _activeFrames = activeFrames;
         const _showFp = ui.showFp;
         const _slotViewMode = ui.slotViewMode;
-        const _slots = slotEls; // reactive map
+        const _slotLabels = sim.currentSlotLabels;
+        const _redZone = redZoneRows;
+        const _slots = slotsVersion; // slot elements changed
 
         if (!wrapperEl || !_step) return;
 
@@ -105,9 +126,7 @@
     function resolveSlotTarget(addr: number): Element | null {
         const el = slotEls.get(addr);
         if (!el) return null;
-        const key = `stack-${addr.toString(16)}`;
-        const mode = ui.slotViewMode.get(key) ?? 'word';
-        if (mode !== 'word') {
+        if (slotMode(addr) !== S) {
             return el.querySelector(`.sub-slot[data-addr="${addr}"]`) ?? el;
         }
         return el;
@@ -163,6 +182,11 @@
             const top = rect.top - colTop + rect.height / 2;
             html += `<span class="flabel" style="top:${top}px">${frame.label}</span>`;
         }
+        if (redZoneEl) {
+            const rect = redZoneEl.getBoundingClientRect();
+            const top = rect.top - colTop + rect.height / 2;
+            html += `<span class="flabel flabel-faint" style="top:${top}px">${$_("stack.red_zone")}</span>`;
+        }
         labelsEl.innerHTML = html;
     }
 
@@ -172,10 +196,7 @@
         let html = "";
         for (const [addr, el] of slotEls) {
             const opacity = parseFloat(el.style.opacity || "1");
-            const key = `stack-${addr.toString(16)}`;
-            const mode = ui.slotViewMode.get(key) ?? 'word';
-
-            if (mode !== 'word') {
+            if (slotMode(addr) !== S) {
                 const subSlotDivs = el.querySelectorAll('.sub-slot');
                 subSlotDivs.forEach((subEl) => {
                     const subAddr = parseInt(subEl.getAttribute('data-addr') ?? '0', 10);
@@ -204,11 +225,22 @@
         return readWritten(step.mem, addr, S);
     }
 
-    function slotMode(key: string): 'word' | 'halfword' | 'byte' {
-        return ui.slotViewMode.get(key) ?? 'word';
+    const slotKey = (addr: number) => `stack-${addr.toString(16)}`;
+
+    // Piece size a slot is shown as: the user's choice, else split to fit the
+    // smallest value stored in it (an 8-byte slot holding two 4-byte ints).
+    function slotMode(addr: number): number {
+        const chosen = ui.slotViewMode.get(slotKey(addr));
+        if (chosen !== undefined) return chosen;
+        let size: number = S;
+        for (let off = 0; off < S; off++) {
+            const label = sim.currentSlotLabels.get(addr + off);
+            if (label) size = Math.min(size, label.size);
+        }
+        return size;
     }
 
-    function setSlotMode(key: string, mode: 'word' | 'halfword' | 'byte') {
+    function setSlotMode(key: string, mode: number) {
         const next = new Map(ui.slotViewMode);
         next.set(key, mode);
         ui.slotViewMode = next;
@@ -266,8 +298,8 @@
                         <div>↑</div>
                     </div>
                     {#each callerGhostRows as row}
-                        {@const key = `stack-${row.addr.toString(16)}`}
-                        {@const mode = slotMode(key)}
+                        {@const key = slotKey(row.addr)}
+                        {@const mode = slotMode(row.addr)}
                         {@const gWord = garbageMem(row.addr, S)}
                         {@const memVal = getSlotMemVal(row.addr)}
                         <div
@@ -282,6 +314,7 @@
                                 {mode}
                                 {memVal}
                                 {gWord}
+                                labels={sim.currentSlotLabels}
                                 disabled={!ui.showGarbage && memVal === undefined}
                                 onModeChange={(m) => setSlotMode(key, m)}
                             />
@@ -305,11 +338,10 @@
                         data-label={frame.label}
                     >
                         {#each frameSlots as addr}
-                            {@const label = sim.currentSlotLabels.get(addr)}
                             {@const memVal = getSlotMemVal(addr)}
                             {@const isHi = hiS.has(addr)}
-                            {@const key = `stack-${addr.toString(16)}`}
-                            {@const mode = slotMode(key)}
+                            {@const key = slotKey(addr)}
+                            {@const mode = slotMode(addr)}
                             {@const gWord = garbageMem(addr, S)}
                             <div
                                 class="frame-slot"
@@ -324,7 +356,7 @@
                                     {mode}
                                     {memVal}
                                     {gWord}
-                                    {label}
+                                    labels={sim.currentSlotLabels}
                                     disabled={!ui.showGarbage && memVal === undefined}
                                     onModeChange={(m) => setSlotMode(key, m)}
                                 />
@@ -333,11 +365,38 @@
                     </div>
                 {/each}
 
+                <!-- Red zone: in use below sp -->
+                {#if redZoneRows.length}
+                    <div class="frame red-zone" bind:this={redZoneEl}>
+                        {#each redZoneRows as addr}
+                            {@const memVal = getSlotMemVal(addr)}
+                            {@const key = slotKey(addr)}
+                            <div
+                                class="frame-slot"
+                                class:hi={hiS.has(addr)}
+                                id="slot-{addr.toString(16)}"
+                                use:registerSlotAction={addr}
+                            >
+                                <StackSlot
+                                    size={S}
+                                    {addr}
+                                    mode={slotMode(addr)}
+                                    {memVal}
+                                    gWord={garbageMem(addr, S)}
+                                    labels={sim.currentSlotLabels}
+                                    disabled={!ui.showGarbage && memVal === undefined}
+                                    onModeChange={(m) => setSlotMode(key, m)}
+                                />
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+
                 <!-- Free zone (below sp) -->
                 <div class="frame free" id="fr-free">
                     {#each freeGhostRows as row}
-                        {@const key = `stack-${row.addr.toString(16)}`}
-                        {@const mode = slotMode(key)}
+                        {@const key = slotKey(row.addr)}
+                        {@const mode = slotMode(row.addr)}
                         {@const gWord = garbageMem(row.addr, S)}
                         {@const memVal = getSlotMemVal(row.addr)}
                         <div
@@ -518,6 +577,7 @@
         flex-direction: row;
         justify-content: space-between;
         align-items: center;
+        gap: 16px;
         background: var(--surface);
         position: relative;
     }
@@ -555,6 +615,19 @@
     .frame.caller .frame-ellipsis {
         border-top: none;
         border-bottom: 1px solid var(--border);
+    }
+    /* In use, but below sp: dashed and hatched to set it apart from a frame */
+    .frame.red-zone .frame-slot {
+        border-top-style: dashed;
+        background: repeating-linear-gradient(
+            -45deg,
+            var(--red-dim) 0 6px,
+            transparent 6px 12px
+        );
+    }
+    :global(.flabel-faint) {
+        color: var(--text-faint);
+        font-style: italic;
     }
     .frame.free .frame-ellipsis {
         border-bottom: none;

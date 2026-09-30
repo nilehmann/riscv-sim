@@ -229,4 +229,35 @@ foo:
         jr      ra
       `,
   },
+  {
+    name: "baz -> foo",
+    isa: "x86",
+    cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
+    entryPoint: "baz",
+    initialRegs: { rsp: 0x7fffffffef08, rbp: 0x7fffffffef30, rdi: 3 },
+    baseAddress: 0x401000,
+    returnAddress: 0x401200,
+    // gcc -O0 -masm=intel
+    assembly: `\
+foo:
+    push rbp
+    mov  rbp, rsp
+    mov  DWORD PTR [rbp-4], edi
+    mov  eax, DWORD PTR [rbp-4]
+    add  eax, 1
+    pop  rbp
+    ret
+
+baz:
+    push rbp
+    mov  rbp, rsp
+    sub  rsp, 8
+    mov  DWORD PTR [rbp-4], edi
+    mov  edi, 1
+    call foo
+    mov  edx, DWORD PTR [rbp-4]
+    add  eax, edx
+    leave
+    ret`,
+  },
 ];

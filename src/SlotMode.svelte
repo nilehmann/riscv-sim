@@ -1,12 +1,20 @@
 <script lang="ts">
+  import { sim } from "./state.svelte";
+
   interface Props {
-    mode: 'word' | 'halfword' | 'byte';
-    showWord?: boolean;
+    /** Size in bytes of the pieces the slot is shown as. */
+    mode: number;
+    /** Size of the whole slot: the largest mode offered. */
+    size: number;
     disabled?: boolean;
     transparent?: boolean;
-    onchange: (mode: 'word' | 'halfword' | 'byte') => void;
+    onchange: (mode: number) => void;
   }
-  let { mode, showWord = true, disabled = false, transparent = false, onchange }: Props = $props();
+  let { mode, size, disabled = false, transparent = false, onchange }: Props = $props();
+
+  // Letters per size come from the ISA (RISC-V: w/h/b, x86: q/d/w/b).
+  const names = $derived(sim.isa.sizeNames);
+  const sizes = $derived([8, 4, 2, 1].filter((s) => s <= size && names[s]));
 
   let open = $state(false);
   let containerEl = $state<HTMLElement | null>(null);
@@ -14,7 +22,7 @@
   let dropTop = $state(0);
   let dropLeft = $state(0);
 
-  const label = $derived(mode === 'word' ? 'w' : mode === 'halfword' ? 'h' : 'b');
+  const label = $derived(names[mode] ?? '?');
 
   function toggle() {
     if (!open && triggerEl) {
@@ -25,7 +33,7 @@
     open = !open;
   }
 
-  function pick(m: 'word' | 'halfword' | 'byte') {
+  function pick(m: number) {
     onchange(m);
     open = false;
   }
@@ -44,11 +52,9 @@
   <button class="trigger" {disabled} bind:this={triggerEl} onclick={toggle}>{label}</button>
   {#if open}
     <div class="dropdown" style="top:{dropTop}px;left:{dropLeft}px">
-      {#if showWord}
-        <button class:active={mode === 'word'} onclick={() => pick('word')}>w</button>
-      {/if}
-      <button class:active={mode === 'halfword'} onclick={() => pick('halfword')}>h</button>
-      <button class:active={mode === 'byte'} onclick={() => pick('byte')}>b</button>
+      {#each sizes as s}
+        <button class:active={mode === s} onclick={() => pick(s)}>{names[s]}</button>
+      {/each}
     </div>
   {/if}
 </div>

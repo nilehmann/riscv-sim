@@ -95,6 +95,33 @@
         return !!el.closest(".cm-editor");
     }
 
+    // ── Panel widths ──
+    // The code panel fits the longest line of the loaded program, in either
+    // view, so instructions are readable without horizontal scrolling.
+    const CODE_MIN = 400;
+    const CODE_MAX = 520;
+    const CHAR_EM = 0.6; // width of a monospace character
+    const codeWidth = $derived.by(() => {
+        const isa = sim.isa;
+        const len = (tokens: { text: string }[]) => tokens.reduce((n, t) => n + t.text.length, 0);
+        let source = 0;
+        let machine = 0;
+        for (const si of sim.assembled?.sourceInstrs ?? []) {
+            source = Math.max(source, len(isa.sourceTokens(si.parsed, si.raw, {})));
+            for (const c of si.concretes) machine = Math.max(machine, len(isa.tokens(c.instr, c.addr)));
+        }
+        // Row chrome: padding, arrow, address, info icon (and bytes in machine view).
+        const chrome = 153;
+        const bytes = 101;
+        const width = Math.max(
+            chrome + source * 18 * CHAR_EM,
+            chrome + bytes + machine * 14 * CHAR_EM,
+        );
+        return Math.round(Math.min(CODE_MAX, Math.max(CODE_MIN, width)));
+    });
+    // 64-bit register values need a wider panel.
+    const regWidth = $derived(sim.isa.wordBytes === 8 ? 250 : 220);
+
     function onKeyDown(e: KeyboardEvent) {
         if (ui.showEditor || ui.showSettings) return;
         if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -138,7 +165,7 @@
 
 <!-- App layout -->
 <header class="app-header">
-    <span class="app-title">RISC-V Simulator</span>
+    <span class="app-title">{$_('app.title', { values: { isa: sim.isa.shortName } })}</span>
     <button class="settings-btn" onclick={() => (ui.showSettings = true)} data-tooltip={$_('settings.tooltip')}>⚙</button>
 </header>
 
@@ -150,7 +177,7 @@
     <ProgramEditor />
 {/if}
 
-<div class="main">
+<div class="main" style="grid-template-columns: {codeWidth}px 1fr {regWidth}px">
     <CodePanel />
     <div class="center-panel">
         <MemoryVisualization />

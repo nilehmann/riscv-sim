@@ -27,6 +27,7 @@ export class Machine {
       const r = this.canonical(k);
       if (r in this.regs) this.regs[r] = BigInt.asUintN(this.bits, BigInt(v));
     }
+    if (isa.flags) this.regs[isa.flags.reg] = 0n;
     this.mem = new Map();
     this.stackBase = stackBase;
     this.osMode = osMode;
@@ -50,7 +51,8 @@ export class Machine {
   /** Returns true if addr is a valid (non-faulting) memory address. */
   checkAccess(addr: number): boolean {
     if (!this.osMode) return true;
-    return addr >= Number(this.reg(this.isa.regs.sp)) && addr < this.stackBase;
+    const low = Number(this.reg(this.isa.regs.sp)) - this.isa.redZone;
+    return addr >= low && addr < this.stackBase;
   }
 
   writeMem(addr: number, value: bigint, bytes: number): void {

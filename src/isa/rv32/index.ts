@@ -2,7 +2,7 @@ import type { Instr, ParsedInstr, Reg } from "./types";
 import type { Isa } from "../types";
 import { ALL_REGS, isReg } from "./types";
 import { parseInstr } from "./parser";
-import { expand, maxInstrs } from "./expand";
+import { expand, minInstrs } from "./expand";
 import { encode } from "./encoder";
 import { tokens, sourceTokens } from "./format";
 import { execute } from "./execute";
@@ -35,6 +35,7 @@ const GARBAGE_TEMPLATES = [
 export const rv32: Isa<ParsedInstr, Instr> = {
   id: "rv32",
   name: "RISC-V (RV32IM)",
+  shortName: "RISC-V",
   wordBytes: 4,
   slotBytes: 4,
   regs: {
@@ -45,11 +46,15 @@ export const rv32: Isa<ParsedInstr, Instr> = {
     zero: "zero",
     returnAddr: "ra",
     aliases: { fp: "s0" },
+    pc: "pc",
   },
+  redZone: 0,
+  sizeNames: { 4: "w", 2: "h", 1: "b" },
+  defaults: { baseAddress: 0x8000, stackBase: 0xc0000000, sp: 0xbfffff00 },
   lineComment: "#",
 
   parseInstr,
-  maxSize: (p) => maxInstrs(p) * 4,
+  minSize: (p) => minInstrs(p) * 4,
   expand,
   size: () => 4,
   encode,

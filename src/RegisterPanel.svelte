@@ -4,7 +4,31 @@
     import HexValue from "./HexValue.svelte";
     import { _ } from "svelte-i18n";
 
-    const hiR = $derived(new Set(sim.currentStep?.hiReg ?? []));
+    const isa = $derived(sim.isa);
+
+    // Registers written by the current step. A narrower view (x86 eax) marks
+    // its full register and is remembered as the name that was used.
+    const written = $derived.by(() => {
+        const m = new Map<string, string | null>();
+        for (const name of sim.currentStep?.hiReg ?? []) {
+            const sub = isa.regs.subRegBytes?.[name] !== undefined;
+            m.set(isa.regs.aliases[name] ?? name, sub ? name : null);
+        }
+        return m;
+    });
+
+    // Status flags, with the ones whose value changed in this step.
+    const flags = $derived.by(() => {
+        if (!isa.flags) return [];
+        const value = sim.currentStep?.regs[isa.flags.reg] ?? 0n;
+        const before = sim.steps[sim.cur - 1]?.regs[isa.flags.reg] ?? value;
+        const bitOf = (v: bigint, bit: number) => Number((v >> BigInt(bit)) & 1n);
+        return isa.flags.bits.map(({ name, bit }) => ({
+            name,
+            value: bitOf(value, bit),
+            changed: bitOf(value, bit) !== bitOf(before, bit),
+        }));
+    });
     const nextAddr = $derived(sim.currentStep?.nextAddr ?? null);
 
     function toggleFp() {
@@ -18,31 +42,50 @@
     <div class="reg-list scrollable">
         <!-- PC row -->
         <div class="reg-row pc-row">
-            <span class="reg-name">pc</span>
-            <span class="reg-val">{nextAddr !== null ? hx(nextAddr) : "?"}</span
+            <span class="reg-name">{isa.regs.pc}</span>
+            <span class="reg-val">{nextAddr !== null ? hx(nextAddr, isa.wordBytes) : "?"}</span
             >
             <span class="reg-desc">{$_('reg.pc')}</span>
         </div>
+
+        <!-- Status flags -->
+        {#if isa.flags}
+            {#key sim.cur}
+                <div class="reg-row flags-row" class:hi={written.has(isa.flags.reg)}>
+                    <span class="reg-name">{$_('reg.flags')}</span>
+                    <div class="flags">
+                        {#each flags as f}
+                            <span class="flag" class:set={f.value === 1} class:changed={f.changed}
+                                data-tooltip={$_('flag.' + f.name)}
+                            >{f.name}<b>{f.value}</b></span>
+                        {/each}
+                    </div>
+                </div>
+            {/key}
+        {/if}
 
         <!-- Register rows — keyed by cur so reg-flash re-triggers each step -->
         {#key sim.cur}
             {#each sim.displayRegs as r}
                 {@const val = sim.currentStep?.regs?.[r.key] ?? null}
-                <div class="reg-row" class:hi={hiR.has(r.name)}>
-                    {#if r.key === sim.isa.regs.fp}
-                        <div class="reg-row-name-line">
-                            <span class="reg-name">{r.name}</span>
+                {@const usedAs = written.get(r.name)}
+                <div class="reg-row" class:hi={written.has(r.name)}>
+                    <div class="reg-row-name-line">
+                        <span class="reg-name">{r.name}</span>
+                        {#if usedAs}
+                            <!-- Written through a narrower name, e.g. eax -->
+                            <span class="sub-reg" data-tooltip={$_('register_panel.sub_reg', { values: { sub: usedAs, reg: r.name } })}>{usedAs}</span>
+                        {/if}
+                        {#if r.key === isa.regs.fp}
                             <button
                                 class="fp-pill"
                                 class:active={ui.showFp}
-                                onclick={toggleFp}>{sim.isa.regs.fpLabel}</button
+                                onclick={toggleFp}>fp</button
                             >
-                        </div>
-                    {:else}
-                        <span class="reg-name">{r.name}</span>
-                    {/if}
+                        {/if}
+                    </div>
                     {#if val !== null}
-                        <HexValue value={val} elementSize={sim.isa.wordBytes} />
+                        <HexValue value={val} elementSize={isa.wordBytes} />
                     {:else}
                         <span class="reg-val">{fmtRegVal(r.key, null)}</span>
                     {/if}
@@ -91,6 +134,48 @@
         color: var(--text-faint);
         background: transparent;
         line-height: 1.4;
+    }
+    .sub-reg {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--orange);
+        background: var(--orange-dim);
+        border-radius: 4px;
+        padding: 0 5px;
+        line-height: 1.5;
+    }
+    .reg-row.flags-row {
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 4px;
+        gap: 4px;
+    }
+    .flags {
+        display: flex;
+        gap: 6px;
+    }
+    .flag {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--text-faint);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 5px;
+        display: flex;
+        gap: 4px;
+    }
+    .flag b {
+        color: var(--text-dim);
+        font-weight: 600;
+    }
+    .flag.set {
+        color: var(--text-dim);
+    }
+    .flag.set b {
+        color: var(--text);
+    }
+    .flag.changed {
+        border-color: var(--orange);
+        background: var(--orange-dim);
     }
     .fp-pill.active {
         color: var(--blue);

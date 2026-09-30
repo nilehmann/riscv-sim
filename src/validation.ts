@@ -1,4 +1,4 @@
-import { AppError, hx } from "./types";
+import { AppError, fmtAddr } from "./types";
 import type { Program, MemoryRegion, AssemblyResult } from "./types";
 import type { Isa } from "./isa/types";
 
@@ -10,9 +10,11 @@ function overlaps(aS: number, aE: number, bS: number, bE: number): boolean {
 
 // ── Individual exported checks ─────────────────────────────────────────────
 
-export function checkU32(v: number, name: string): AppError | null {
-  if (v >>> 0 !== v)
-    return new AppError(`${name} ${hx(v)} does not fit in 32 bits`);
+/** Addresses are 32 bits wide on 32-bit ISAs and 48 bits wide on 64-bit ones. */
+export function checkAddr(v: number, name: string, isa: Isa): AppError | null {
+  const bits = isa.wordBytes === 4 ? 32 : 48;
+  if (!Number.isInteger(v) || v < 0 || v >= 2 ** bits)
+    return new AppError(`${name} 0x${v.toString(16).toUpperCase()} does not fit in ${bits} bits`);
   return null;
 }
 
@@ -30,7 +32,7 @@ export function checkElementFit(
 export function checkSpStackBase(sp: number, stackBase: number): AppError | null {
   if (sp > stackBase)
     return new AppError(
-      `Initial sp (${hx(sp)}) is greater than stackBase (${hx(stackBase)}); the valid stack range [sp, stackBase) would be empty`,
+      `Initial sp (${fmtAddr(sp)}) is greater than stackBase (${fmtAddr(stackBase)}); the valid stack range [sp, stackBase) would be empty`,
     );
   return null;
 }
@@ -52,7 +54,7 @@ export function checkRegionRegionOverlap(regions: MemoryRegion[]): AppError | nu
       const r2End = r2.addr + r2.elements.length * r2.elementSize;
       if (overlaps(r.addr, rEnd, r2.addr, r2End))
         return new AppError(
-          `memoryRegions[${ri}] (${hx(r.addr)}–${hx(rEnd - 1)}) overlaps memoryRegions[${rj}] (${hx(r2.addr)}–${hx(r2End - 1)})`,
+          `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps memoryRegions[${rj}] (${fmtAddr(r2.addr)}–${fmtAddr(r2End - 1)})`,
         );
     }
   }
@@ -69,7 +71,7 @@ export function checkRegionStackOverlap(
     const rEnd = r.addr + r.elements.length * r.elementSize;
     if (overlaps(r.addr, rEnd, sp, stackBase))
       return new AppError(
-        `memoryRegions[${ri}] (${hx(r.addr)}–${hx(rEnd - 1)}) overlaps the stack (${hx(sp)}–${hx(stackBase - 1)})`,
+        `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the stack (${fmtAddr(sp)}–${fmtAddr(stackBase - 1)})`,
       );
   }
   return null;
@@ -95,7 +97,7 @@ export function checkRaRange(
 ): AppError | null {
   if (ra >= progStart && ra < progEnd)
     return new AppError(
-      `Initial ${name} (${hx(ra)}) points inside the program range [${hx(progStart)}–${hx(progEnd - 1)}]`,
+      `Initial ${name} (${fmtAddr(ra)}) points inside the program range [${fmtAddr(progStart)}–${fmtAddr(progEnd - 1)}]`,
       `Set initialRegs.${name} to an address outside the program`,
     );
   return null;
@@ -104,7 +106,7 @@ export function checkRaRange(
 export function checkCodeStackOverlap(codeEnd: number, stackBase: number): AppError | null {
   if (codeEnd > stackBase)
     return new AppError(
-      `Code section ends at ${hx(codeEnd)}, overlapping stack base ${hx(stackBase)}`,
+      `Code section ends at ${fmtAddr(codeEnd)}, overlapping stack base ${fmtAddr(stackBase)}`,
       "Reduce baseAddress or increase stackBase",
     );
   return null;
@@ -120,7 +122,7 @@ export function checkRegionCodeOverlap(
     const rEnd = r.addr + r.elements.length * r.elementSize;
     if (overlaps(r.addr, rEnd, progStart, progEnd))
       return new AppError(
-        `memoryRegions[${ri}] (${hx(r.addr)}–${hx(rEnd - 1)}) overlaps the code segment (${hx(progStart)}–${hx(progEnd - 1)})`,
+        `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the code segment (${fmtAddr(progStart)}–${fmtAddr(progEnd - 1)})`,
       );
   }
   return null;
@@ -131,11 +133,11 @@ export function checkRegionCodeOverlap(
 export function validateProgram(prog: Program, isa: Isa): AppError | null {
   let err: AppError | null;
 
-  err = checkU32(prog.baseAddress, "baseAddress");
+  err = checkAddr(prog.baseAddress, "baseAddress", isa);
   if (err) return err;
 
   if (prog.stackBase != null) {
-    err = checkU32(prog.stackBase, "stackBase");
+    err = checkAddr(prog.stackBase, "stackBase", isa);
     if (err) return err;
   }
 
@@ -148,8 +150,13 @@ export function validateProgram(prog: Program, isa: Isa): AppError | null {
   }
 
   if (prog.osMode !== false) {
-    const stackBase = prog.stackBase ?? 0xc0000000;
+    const stackBase = prog.stackBase ?? isa.defaults.stackBase;
     err = checkSpStackBase(prog.initialRegs[isa.regs.sp] ?? 0, stackBase);
+    if (err) return err;
+  }
+
+  if (prog.returnAddress != null) {
+    err = checkAddr(prog.returnAddress, "returnAddress", isa);
     if (err) return err;
   }
 
@@ -159,7 +166,7 @@ export function validateProgram(prog: Program, isa: Isa): AppError | null {
     if (err) return err;
   }
 
-  const stackBase = prog.stackBase ?? 0xc0000000;
+  const stackBase = prog.stackBase ?? isa.defaults.stackBase;
   const sp = prog.initialRegs[isa.regs.sp] ?? stackBase;
   err = checkRegionStackOverlap(regions, sp, stackBase);
   if (err) return err;
@@ -175,7 +182,7 @@ export function validateAssembled(
   const { labels } = assembled;
   const progStart = prog.baseAddress;
   const progEnd = assembled.endAddr;
-  const stackBase = prog.stackBase ?? 0xc0000000;
+  const stackBase = prog.stackBase ?? isa.defaults.stackBase;
 
   let err: AppError | null;
 

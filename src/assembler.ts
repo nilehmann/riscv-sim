@@ -7,10 +7,9 @@ import { parseProgram } from "./parser";
 // ─── Assembler ────────────────────────────────────────────────────────────
 // Instruction sizes can depend on label addresses (RISC-V `call` is jal or
 // auipc+jalr, x86 jumps are short or near), and label addresses depend on
-// sizes. Start from each line's maximum size and re-expand every line against
-// the current layout until sizes stop changing. Sizes only shrink from the
-// maximum, so this converges; errors are reported for the final layout only,
-// since earlier ones may disappear once the code shrinks.
+// sizes. Like gas, start from each line's smallest size and re-expand every
+// line against the current layout until sizes stop changing. Sizes only grow,
+// so this converges; errors are reported for the final layout only.
 
 const MAX_LAYOUT_PASSES = 32;
 
@@ -41,7 +40,7 @@ export function assembleProgram(
     return { starts, labels, end: addr };
   }
 
-  let sizes = lines.map((l) => isa.maxSize(l.parsed));
+  let sizes = lines.map((l) => isa.minSize(l.parsed));
   for (let pass = 0; ; pass++) {
     const { starts, labels, end } = layout(sizes);
     let firstError = null as AppError | null;

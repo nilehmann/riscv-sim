@@ -1,4 +1,4 @@
-import type { AssemblyResult, DisplayReg, FrameInfo, Program, Step } from "./types";
+import type { AssemblyResult, DisplayReg, FrameInfo, Program, SlotLabel, Step } from "./types";
 import type { Isa } from "./isa/types";
 import { AppError, hx } from "./types";
 import { getIsa } from "./isa";
@@ -36,7 +36,8 @@ export class UIState {
   /** Suppresses the CSS transition on the first fp-arrow render. Reset when fp is toggled on. */
   firstFpArrowRender = $state(true);
   selectorOpen = $state(false);
-  slotViewMode = $state<Map<string, 'word' | 'halfword' | 'byte'>>(new Map());
+  /** User-chosen piece size in bytes for a slot, by slot key. */
+  slotViewMode = $state<Map<string, number>>(new Map());
   showGarbage = $state(true);
   theme = $state<'light' | 'dark' | 'system'>(
     (localStorage.getItem('theme') as 'light' | 'dark' | 'system') ?? 'system'
@@ -63,7 +64,7 @@ export class SimulationState {
   sourcePositions = $state<number[]>([]);
   displayRegs = $state<DisplayReg[]>([]);
   callFramesByStep = $state<FrameInfo[][]>([]);
-  slotLabelsByStep = $state<Map<number, string>[]>([]);
+  slotLabelsByStep = $state<Map<number, SlotLabel>[]>([]);
   inferError = $state<{ step: number; message: string } | null>(null);
   cur = $state(0);
   asmMode = $state<AsmMode>("source");
@@ -95,7 +96,7 @@ export class SimulationState {
 
   currentStep = $derived(this.steps[this.cur] ?? null);
   currentCallFrames = $derived(this.callFramesByStep[this.cur] ?? []);
-  currentSlotLabels = $derived(this.slotLabelsByStep[this.cur] ?? new Map<number, string>());
+  currentSlotLabels = $derived(this.slotLabelsByStep[this.cur] ?? new Map<number, SlotLabel>());
   stackEnabled = $derived(this.program?.showStack !== false);
 
   // ── Actions ──
@@ -151,9 +152,9 @@ export class SimulationState {
     this.loadError = validateAssembled(prog, assembled, isa);
     if (this.loadError) return;
 
-    const { steps, sourceToConcrete, initialReturnAddr } = simulate(prog, assembled, isa);
+    const { steps, sourceToConcrete, initialReturnAddr, initialSlotLabels } = simulate(prog, assembled, isa);
     const { callFramesByStep, slotLabelsByStep, error } = inferDisplayState(
-      steps, assembled, prog, isa, initialReturnAddr,
+      steps, assembled, prog, isa, initialReturnAddr, initialSlotLabels,
     );
 
     this.program = prog;

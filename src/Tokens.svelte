@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Token } from "./isa/types";
-  import { hx } from "./types";
+  import { fmtAddr } from "./types";
 
   // Renders syntax-highlighted instruction tokens (see Isa.tokens/sourceTokens).
   let { tokens }: { tokens: Token[] } = $props();
@@ -15,7 +15,7 @@
     <span class="imm">{tok.text}</span>
   {:else if tok.kind === "label"}
     {#if tok.addr !== undefined}
-      <span class="fn" data-target-addr={tok.addr} data-tooltip="addr: {hx(tok.addr)}">{tok.text}</span>
+      <span class="fn" data-target-addr={tok.addr} data-tooltip="addr: {fmtAddr(tok.addr)}">{tok.text}</span>
     {:else}
       <span class="fn">{tok.text}</span>
     {/if}

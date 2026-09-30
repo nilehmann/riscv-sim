@@ -1,9 +1,8 @@
-export function subSlots(addr: number, nativeBytes: 1 | 2 | 4 | 8, mode: 'halfword' | 'byte') {
-    const subSize: 1 | 2 = mode === 'byte' ? 1 : 2;
-    const count = nativeBytes / subSize;
-    return Array.from({ length: count }, (_, i) => ({
+/** Splits a slot of `nativeBytes` into pieces of `subSize` bytes, lowest address first. */
+export function subSlots<S extends number>(addr: number, nativeBytes: number, subSize: S) {
+    return Array.from({ length: nativeBytes / subSize }, (_, i) => ({
         addr: addr + i * subSize,
-        size: subSize as 1 | 2,
+        size: subSize,
     }));
 }
 

@@ -7,6 +7,8 @@
     import { oneDark } from "@codemirror/theme-one-dark";
     import { vim } from "@replit/codemirror-vim";
     import type { Program, MemoryRegion } from "./types";
+    import type { Isa, IsaId } from "./isa/types";
+    import { getIsa, ISA_IDS } from "./isa";
     import { checkElementFit } from "./validation";
     import { sim, ui } from "./state.svelte";
     import { get } from "svelte/store";
@@ -14,32 +16,36 @@
 
     // ── Assembly language mode (keywords come from the program's ISA) ─────────
 
-    const isa = sim.isa;
-    const REGISTERS = new Set<string>([...isa.regs.names, ...Object.keys(isa.regs.aliases)]);
-    const MNEMONICS = isa.editor.mnemonics;
+    let isaId = $state<IsaId>(sim.isa.id);
+    const isa = $derived(getIsa(isaId));
     const isReg = (r: string) => isa.regs.names.includes(r);
-    const ALL_REGS = isa.regs.names;
-    const SP = isa.regs.sp;
-    const ZERO = isa.regs.zero;
-    const RA = isa.regs.returnAddr;
+    const ALL_REGS = $derived(isa.regs.names);
+    const SP = $derived(isa.regs.sp);
+    const ZERO = $derived(isa.regs.zero);
+    const RA = $derived(isa.regs.returnAddr);
 
-    const asmLang = StreamLanguage.define({
+    const makeLang = (isa: Isa) => {
+      const REGISTERS = new Set<string>([...isa.regs.names, ...Object.keys(isa.regs.aliases)]);
+      const MNEMONICS = isa.editor.mnemonics;
+      return StreamLanguage.define({
         token(stream) {
             if (stream.eatSpace()) return null;
             if (stream.match(/^#.*/) || stream.match(/^\/\/.*/)) return "comment";
             if (stream.match(/^-?0x[0-9a-fA-F]+/i) || stream.match(/^-?\d+/)) return "number";
             if (stream.match(/^[a-zA-Z_.][a-zA-Z0-9_.]*/)) {
                 const word = stream.current();
-                if (word.startsWith(".")) return "meta";
                 if (stream.peek() === ":") return "def";
-                if (REGISTERS.has(word)) return "builtin";
-                if (MNEMONICS.has(word)) return "keyword";
+                if (word.startsWith(".")) return "meta";
+                const lower = word.toLowerCase();
+                if (REGISTERS.has(lower)) return "builtin";
+                if (MNEMONICS.has(lower)) return "keyword";
                 return "variable";
             }
             stream.next();
             return null;
         },
-    });
+      });
+    };
 
     const asmHighlight = HighlightStyle.define([
         { tag: tags.lineComment,                 color: "var(--text-faint)", fontStyle: "italic" },
@@ -61,6 +67,7 @@
         ".cm-activeLineGutter": { background: "rgba(128,128,128,0.05)" },
     });
 
+    const langCompartment = new Compartment();
     const themeCompartment = new Compartment();
     const vimCompartment = new Compartment();
     const darkMQ = window.matchMedia("(prefers-color-scheme: dark)");
@@ -81,19 +88,20 @@
 
     // ── Component state ───────────────────────────────────────────────────────
 
-    const DEFAULT_STACK_BASE = 0xc0000000;
-    const DEFAULT_SP = 0xbfffff00;
+    const hex = (v: number) => "0x" + v.toString(16);
+    /** Default return-address register value for ISAs that have one. */
+    const DEFAULT_RA = 0x8050;
 
     let name = $state(sim.program?.name ?? "");
     let entryPoint = $state(sim.program?.entryPoint ?? "");
-    let baseAddress = $state("0x" + (sim.program?.baseAddress ?? 0x8000).toString(16));
+    let baseAddress = $state(hex(sim.program?.baseAddress ?? sim.isa.defaults.baseAddress));
     let assembly = $state(sim.program?.assembly ?? "");
     let regs = $state<Array<{ reg: string; val: string }>>(
         Object.entries(
             (() => {
                 const ir = sim.program?.initialRegs;
-                const raDefault: Record<string, number> = RA ? { [RA]: 0x8050 } : {};
-                const defaults: Record<string, number> = { [SP]: DEFAULT_SP, ...raDefault };
+                const raDefault: Record<string, number> = RA ? { [RA]: DEFAULT_RA } : {};
+                const defaults: Record<string, number> = { [SP]: isa.defaults.sp, ...raDefault };
                 if (!ir) return sim.program?.showStack ? raDefault : defaults;
                 return sim.program.showStack
                     ? Object.fromEntries(Object.entries(ir).filter(([k]) => k !== SP))
@@ -102,8 +110,28 @@
         ).map(([reg, val]) => ({ reg, val: "0x" + (val as number).toString(16) }))
     );
     let showStack = $state(sim.program?.showStack ?? false);
-    let stackBase = $state("0x" + (sim.program?.stackBase ?? DEFAULT_STACK_BASE).toString(16));
-    let stackSp   = $state("0x" + (sim.program?.initialRegs?.[SP] ?? DEFAULT_SP).toString(16));
+    let stackBase = $state(hex(sim.program?.stackBase ?? sim.isa.defaults.stackBase));
+    let stackSp   = $state(hex(sim.program?.initialRegs?.[sim.isa.regs.sp] ?? sim.isa.defaults.sp));
+    // Only for ISAs that keep the return address on the stack.
+    let returnAddr = $state(sim.program?.returnAddress != null ? hex(sim.program.returnAddress) : "");
+
+    // Registers and addresses differ between ISAs, so switching starts from
+    // the new ISA's defaults. The assembly text is kept.
+    function setIsa(id: IsaId) {
+        if (id === isaId) return;
+        isaId = id;
+        const next = getIsa(id);
+        const ra = next.regs.returnAddr;
+        regs = [
+            ...(showStack ? [] : [{ reg: next.regs.sp, val: hex(next.defaults.sp) }]),
+            ...(ra ? [{ reg: ra, val: hex(DEFAULT_RA) }] : []),
+        ];
+        baseAddress = hex(next.defaults.baseAddress);
+        stackBase = hex(next.defaults.stackBase);
+        stackSp = hex(next.defaults.sp);
+        returnAddr = "";
+        viewRef?.dispatch({ effects: langCompartment.reconfigure(makeLang(next)) });
+    }
 
     type RegionRow = { addr: string; elementSize: 1 | 2 | 4; elements: string[] };
     let scrollEls: (HTMLElement | null)[] = [];
@@ -141,7 +169,7 @@
             doc: untrack(() => assembly),
             extensions: [
                 basicSetup,
-                asmLang,
+                langCompartment.of(untrack(() => makeLang(isa))),
                 syntaxHighlighting(asmHighlight),
                 structuralTheme,
                 themeCompartment.of(isDark() ? oneDark : []),
@@ -241,6 +269,11 @@
             if (isNaN(parsedStackSp)) { loadError = get(_)("editor.err_stack_pointer"); return; }
             initialRegs[SP] = parsedStackSp;
         }
+        let parsedReturnAddr: number | undefined;
+        if (RA === null && returnAddr.trim()) {
+            parsedReturnAddr = parseInt(returnAddr);
+            if (isNaN(parsedReturnAddr)) { loadError = get(_)("editor.err_return_address"); return; }
+        }
         const memoryRegions: MemoryRegion[] = [];
         for (let ri = 0; ri < regions.length; ri++) {
             const r = regions[ri]!;
@@ -256,7 +289,7 @@
             }
             memoryRegions.push({ addr, elementSize: r.elementSize, elements });
         }
-        const prog: Program = { name, isa: isa.id, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase, memoryRegions };
+        const prog: Program = { name, isa: isa.id, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase, returnAddress: parsedReturnAddr, memoryRegions };
         sim.loadProgram(prog);
         if (sim.loadError) {
             loadError = sim.loadError.message + (sim.loadError.detail ? `\n${sim.loadError.detail}` : "");
@@ -276,6 +309,20 @@
         </div>
 
         <div class="panel-body">
+            <!-- Architecture -->
+            <div class="toggle-row">
+                <span class="toggle-label">{$_('editor.isa')}</span>
+                <div class="size-group">
+                    {#each ISA_IDS as id}
+                        <button
+                            class="size-btn"
+                            class:active={isaId === id}
+                            onclick={() => setIsa(id)}
+                        >{getIsa(id).shortName}</button>
+                    {/each}
+                </div>
+            </div>
+
             <!-- Name + entry point + base address row -->
             <div class="row2">
                 <div class="field">
@@ -288,7 +335,7 @@
                 </div>
                 <div class="field field-narrow">
                     <label class="field-label">{$_('editor.base_address')}</label>
-                    <input class="input mono" bind:value={baseAddress} placeholder={$_('editor.placeholder_base')} />
+                    <input class="input mono" bind:value={baseAddress} placeholder={hex(isa.defaults.baseAddress)} />
                 </div>
             </div>
 
@@ -312,7 +359,7 @@
                                 class="input mono reg-name"
                                 class:invalid={regInvalidIdxs.has(i)}
                                 bind:value={row.reg}
-                                placeholder={$_('editor.placeholder_reg')}
+                                placeholder={ALL_REGS.slice(0, 3).join(", ") + "…"}
                             />
                             <input class="input mono reg-val" bind:value={row.val} placeholder={$_('editor.placeholder_val')} />
                             <button class="remove-btn" onclick={() => removeReg(i)}>×</button>
@@ -321,6 +368,14 @@
                     <button class="add-reg-btn" onclick={addReg}>{$_('editor.add_register')}</button>
                 </div>
             </div>
+
+            <!-- Return address: on the stack for ISAs without a link register -->
+            {#if RA === null}
+                <div class="field">
+                    <label class="field-label">{$_('editor.return_address')}</label>
+                    <input class="input mono" bind:value={returnAddr} placeholder={$_('editor.placeholder_return')} />
+                </div>
+            {/if}
 
             <div class="toggle-row">
                 <span class="toggle-label">{$_('editor.show_stack')}</span>
@@ -335,11 +390,11 @@
                 <div class="row2">
                     <div class="field">
                         <label class="field-label">{$_('editor.stack_base')}</label>
-                        <input class="input mono" bind:value={stackBase} placeholder="0xc0000000" />
+                        <input class="input mono" bind:value={stackBase} placeholder={hex(isa.defaults.stackBase)} />
                     </div>
                     <div class="field">
-                        <label class="field-label">{$_('editor.stack_pointer')}</label>
-                        <input class="input mono" bind:value={stackSp} placeholder="0xbfffff00" />
+                        <label class="field-label">{$_('editor.stack_pointer', { values: { sp: SP } })}</label>
+                        <input class="input mono" bind:value={stackSp} placeholder={hex(isa.defaults.sp)} />
                     </div>
                 </div>
             {/if}

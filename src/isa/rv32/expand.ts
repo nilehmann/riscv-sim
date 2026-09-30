@@ -201,14 +201,8 @@ export function expand(p: ParsedInstr, ctx: ExpandCtx): Instr[] | AppError {
   }
 }
 
-// Returns the worst-case number of concrete instructions for a parsed instr.
-// Used in pass 1 to assign label addresses pessimistically.
-export function maxInstrs(parsed: ParsedInstr): number {
-  // call may collapse to 1 jal, but pessimistically assume 2 (auipc+jalr)
-  if (parsed.op === "call") return 2;
-  // li may expand to 2 (lui+addi) but that doesn't depend on labels
-  // so it doesn't affect label addresses in a way that needs pessimism here;
-  // we still count worst case to be safe
-  if (parsed.op === "li") return 2;
+// Fewest machine instructions a parsed instr can assemble to: `call` and `li`
+// grow to two when the target or the immediate is out of range.
+export function minInstrs(_parsed: ParsedInstr): number {
   return 1;
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
     import type { AssemblyResult, Concrete, SourceInstr } from "./types";
-    import { hx } from "./types";
+    import { fmtAddr } from "./types";
     import { sim, ui } from "./state.svelte";
     import Tokens from "./Tokens.svelte";
     import EncodingPopover from "./EncodingPopover.svelte";
@@ -221,6 +221,9 @@
 
     // ─── Machine view: bytes per row, encoding popover on hover/click ─────
 
+    // Longer instructions wrap onto byte-only lines, as in objdump.
+    const BYTES_PER_LINE = 4;
+
     function hexBytes(c: Concrete): string[] {
         return sim.isa.encode(c.instr).bytes.map((b) =>
             b.toString(16).toUpperCase().padStart(2, "0"),
@@ -357,7 +360,7 @@
                     {#snippet garbageRow(g: GarbageRow)}
                         <div class="line garbage garbage-{g.tier}" id="al-{g.c.addr.toString(16)}">
                             <span class="pc-arrow">▶</span>
-                            <span class="asm-addr">{hx(g.c.addr)}</span>
+                            <span class="asm-addr">{fmtAddr(g.c.addr)}</span>
                             <span class="instr-span"><Tokens tokens={sim.isa.tokens(g.c.instr, g.c.addr)} /></span>
                         </div>
                     {/snippet}
@@ -365,12 +368,13 @@
                         {@const addr = c.addr}
                         <div
                             class="line machine-row {extraClass}"
+                            class:multi-line={c.size > BYTES_PER_LINE}
                             class:enc-open={popAddr === addr}
                             class:enc-pinned={pinnedAddr === addr}
                             id="al-{addr.toString(16)}"
                         >
                             <span class="pc-arrow">▶</span>
-                            <span class="asm-addr">{hx(addr)}</span>
+                            <span class="asm-addr">{fmtAddr(addr)}</span>
                             <span class="instr-span mc-bytes">
                                 {#each hexBytes(c) as b}<span>{b}</span>{/each}
                             </span>
@@ -401,7 +405,7 @@
                                 id="al-{si.firstAddr.toString(16)}"
                             >
                                 <span class="pc-arrow">▶</span>
-                                <span class="asm-addr">{hx(si.firstAddr)}</span>
+                                <span class="asm-addr">{fmtAddr(si.firstAddr)}</span>
                                 <span class="instr-span"><Tokens tokens={sim.isa.sourceTokens(si.parsed, si.raw, sim.assembled!.labels)} /></span>
                                 <!-- Hover (or focus) shows what this line assembles to -->
                                 <button
@@ -624,11 +628,21 @@
         /* children use smaller fonts; keep the same row height as other modes */
         min-height: 1.8em;
     }
+    /* Always 4 bytes wide, so instruction text lines up across rows */
     .mc-bytes {
-        display: flex;
-        gap: 4px;
+        display: grid;
+        grid-template-columns: repeat(4, 2ch);
+        column-gap: 4px;
         font-size: 16px;
         flex-shrink: 0;
+    }
+    /* Line up the address and instruction with the first line of bytes */
+    :global(.line.machine-row.multi-line) {
+        align-items: baseline;
+    }
+    :global(.line.machine-row.multi-line) .mc-bytes {
+        line-height: 1.5;
+        padding: 4px 0;
     }
     .mc-instr {
         font-size: 14px;
