@@ -8,7 +8,8 @@
     "tab_assembly": "Assembly",
     "tab_c": "C",
     "mode_source": "Fuente",
-    "mode_machine": "Máquina"
+    "mode_machine": "Máquina",
+    "show_expansion": "Mostrar instrucciones ensambladas"
   },
   "register_panel": {
     "title": "Registros"

@@ -7,9 +7,10 @@
     import { encode, wordBytes } from "./encoder";
     import InstrView from "./InstrView.svelte";
     import EncodingPopover from "./EncodingPopover.svelte";
+    import Popover from "./Popover.svelte";
     import { _ } from "svelte-i18n";
 
-    // ─── HTML escape (used by highlightC and infoIconHtml) ───────────────
+    // ─── HTML escape (used by highlightC) ─────────────────────────────────
 
     function esc(s: string): string {
         return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -183,9 +184,6 @@
         `<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line>` +
         `<line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
 
-    function infoIconHtml(tooltip: string): string {
-        return `<span class="instr-info" data-tooltip="${esc(tooltip)}">${INFO_SVG}</span>`;
-    }
 
     // ─── Line groups: label headers + source instrs (computed from assembled)
 
@@ -300,22 +298,23 @@
         return m;
     });
 
-    // Encoding popover. Hovering the info icon opens it, and it stays open while
-    // the pointer is on the icon or the popover (a short delay lets it cross the
-    // gap). Clicking the icon pins it until unpinned, clicked outside, or Esc.
+    // Row popover (Source: expanded instructions; Machine: encoding). Hovering
+    // the info icon opens it, and it stays open while the pointer is on the icon
+    // or the popover (a short delay lets it cross the gap). In Machine view,
+    // clicking the icon pins it until unpinned, clicked outside, or Esc.
     let hoverAddr = $state<number | null>(null);
     let pinnedAddr = $state<number | null>(null);
     const popAddr = $derived(pinnedAddr ?? hoverAddr);
     let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
-    function showEncoding(addr: number) {
+    function showPopover(addr: number) {
         clearTimeout(hideTimer);
         hoverAddr = addr;
     }
-    function keepEncoding() {
+    function keepPopover() {
         clearTimeout(hideTimer);
     }
-    function hideEncodingSoon() {
+    function hidePopoverSoon() {
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => (hoverAddr = null), 150);
     }
@@ -326,7 +325,7 @@
     function onWindowPointerDown(e: PointerEvent) {
         if (pinnedAddr == null) return;
         // Info icons handle their own clicks; the popover itself is interactive.
-        if ((e.target as Element | null)?.closest(".mc-info, .enc-popover")) return;
+        if ((e.target as Element | null)?.closest(".row-info, .popover")) return;
         pinnedAddr = null;
     }
     function onWindowKeyDown(e: KeyboardEvent) {
@@ -343,6 +342,11 @@
     });
 
     const popEntry = $derived(popAddr != null ? (machineInstrs.get(popAddr) ?? null) : null);
+    const popSource = $derived.by(() => {
+        if (popAddr == null || !sim.assembled) return null;
+        const idx = sim.assembled.addrToSourceIdx.get(popAddr);
+        return idx != null ? sim.assembled.sourceInstrs[idx]! : null;
+    });
 
     // A source line is a pseudo-instruction if it expanded to something else.
     function isPseudo(si: SourceInstr): boolean {
@@ -429,14 +433,14 @@
                             {#if !extraClass.includes("garbage")}
                                 <!-- Hover (or focus) shows the encoding popover, click pins it -->
                                 <button
-                                    class="mc-info"
+                                    class="row-info"
                                     aria-label={$_("encoding.show")}
                                     aria-pressed={pinnedAddr === addr}
                                     onclick={() => togglePin(addr)}
-                                    onmouseenter={() => showEncoding(addr)}
-                                    onmouseleave={hideEncodingSoon}
-                                    onfocus={() => showEncoding(addr)}
-                                    onblur={hideEncodingSoon}
+                                    onmouseenter={() => showPopover(addr)}
+                                    onmouseleave={hidePopoverSoon}
+                                    onfocus={() => showPopover(addr)}
+                                    onblur={hidePopoverSoon}
                                 >{@html INFO_SVG}</button>
                             {/if}
                         </div>
@@ -451,14 +455,23 @@
                                     <span class="lbl">{label}:</span>
                                 </div>
                             {/if}
-                            {@const tipContent = si.concretes.map((c, i) =>
-                                fmtConcreteRel(c, si.firstAddr + i * 4)
-                            ).join("\n")}
-                            <div class="line" id="al-{si.firstAddr.toString(16)}">
+                            <div
+                                class="line"
+                                class:enc-open={popAddr === si.firstAddr}
+                                id="al-{si.firstAddr.toString(16)}"
+                            >
                                 <span class="pc-arrow">▶</span>
                                 <span class="asm-addr">{hx(si.firstAddr)}</span>
                                 <span class="instr-span"><InstrView {si} labels={sim.assembled!.labels} /></span>
-                                {@html infoIconHtml(tipContent)}
+                                <!-- Hover (or focus) shows what this line assembles to -->
+                                <button
+                                    class="row-info"
+                                    aria-label={$_("code_panel.show_expansion")}
+                                    onmouseenter={() => showPopover(si.firstAddr)}
+                                    onmouseleave={hidePopoverSoon}
+                                    onfocus={() => showPopover(si.firstAddr)}
+                                    onblur={hidePopoverSoon}
+                                >{@html INFO_SVG}</button>
                             </div>
                         {/each}
                         {#each garbageAfter as g}{@render garbageRow(g)}{/each}
@@ -504,10 +517,19 @@
         labels={sim.assembled?.labels ?? {}}
         anchor={popAnchor}
         pinned={pinnedAddr != null}
-        onenter={keepEncoding}
-        onleave={hideEncodingSoon}
+        onenter={keepPopover}
+        onleave={hidePopoverSoon}
         onclose={() => (pinnedAddr = null)}
     />
+{:else if sim.asmMode === "source" && popAddr != null && popSource && popAnchor}
+    <Popover anchor={popAnchor} onenter={keepPopover} onleave={hidePopoverSoon}>
+        <div class="expansion">
+            {#each popSource.concretes as c, i}
+                {@const ciAddr = popSource.firstAddr + i * 4}
+                <div>{@html hlConcreteInstr(fmtConcreteRel(c, ciAddr), {}, ciAddr)}</div>
+            {/each}
+        </div>
+    </Popover>
 {/if}
 
 <style>
@@ -646,25 +668,6 @@
         text-decoration: underline dotted currentColor;
         text-underline-offset: 2px;
     }
-    :global(.instr-info) {
-        position: absolute;
-        right: 10px;
-        top: 50%;
-        transform: translateY(-50%);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--text-faint);
-        cursor: default;
-        user-select: none;
-        opacity: 0;
-        transition: opacity 0.15s;
-    }
-    :global(.line:hover .instr-info),
-    :global(.concrete-group:hover > .instr-info) {
-        opacity: 1;
-    }
-    :global(.instr-info:hover) { color: var(--text-dim); }
     :global(.concrete-group) {
         border: 1px solid var(--border);
         border-radius: 6px;
@@ -673,10 +676,6 @@
         overflow: clip;
         margin: 2px 4px;
         position: relative;
-    }
-    :global(.concrete-group > .instr-info) {
-        top: 6px;
-        transform: none;
     }
     /* 4px margin + 1px border + 3px padding lines up with the 8px row padding */
     :global(.concrete-group .line) {
@@ -705,7 +704,7 @@
     /* margin-left: auto pushes it to the row's right edge; sticky keeps it at
        the panel's visible edge when the row overflows, with the text scrolling
        under a short fade. */
-    .mc-info {
+    .row-info {
         margin-left: auto;
         position: sticky;
         right: 0;
@@ -722,17 +721,17 @@
         opacity: 0;
         transition: opacity 0.15s;
     }
-    :global(.line.machine-row:hover) .mc-info,
-    :global(.line.machine-row.enc-open) .mc-info {
+    :global(.line:hover) .row-info,
+    :global(.line.enc-open) .row-info {
         opacity: 1;
     }
-    .mc-info:hover {
+    .row-info:hover {
         color: var(--text-dim);
     }
-    :global(.line.machine-row.enc-pinned) .mc-info {
+    :global(.line.enc-pinned) .row-info {
         color: var(--blue);
     }
-    :global(.line.machine-row.enc-open) {
+    :global(.line.enc-open) {
         --row-tint: var(--blue-dim);
         background: var(--row-tint);
     }
@@ -741,6 +740,11 @@
     }
     :global(.line.garbage-far) {
         opacity: 0.08;
+    }
+    .expansion {
+        font-size: 16px;
+        line-height: 1.7;
+        white-space: pre;
     }
     .c-view {
         font-family: var(--mono);

@@ -4,6 +4,7 @@
   import { encodeDetailed, wordBytes } from "./encoder";
   import { hx } from "./assembler";
   import InstrView from "./InstrView.svelte";
+  import Popover from "./Popover.svelte";
   import { _ } from "svelte-i18n";
 
   let {
@@ -24,12 +25,9 @@
     /** Source pseudo-instruction this instruction was expanded from, if any. */
     pseudo: SourceInstr | null;
     labels: Record<string, number>;
-    /** Viewport point the popover attaches to: right edge / top of the row. */
     anchor: { x: number; y: number };
-    /** The pointer entering/leaving the popover keeps it open / lets it close. */
     onenter: () => void;
     onleave: () => void;
-    /** Pinned popovers stay open regardless of the pointer until closed. */
     pinned: boolean;
     onclose: () => void;
   } = $props();
@@ -61,29 +59,9 @@
   function fitsLabel(f: Field): boolean {
     return f.name.length * LABEL_CHAR_PX <= span(f) * BIT_COL_PX - 4;
   }
-
-  // ─── Positioning: to the right of the row, clamped to the viewport ──────
-  let w = $state(0);
-  let h = $state(0);
-  const MARGIN = 8;
-  const left = $derived(
-    Math.max(MARGIN, Math.min(anchor.x + MARGIN, window.innerWidth - w - MARGIN)),
-  );
-  const top = $derived(
-    Math.max(MARGIN, Math.min(anchor.y, window.innerHeight - h - MARGIN)),
-  );
 </script>
 
-<div
-  class="enc-popover"
-  class:pinned
-  role="tooltip"
-  onmouseenter={onenter}
-  onmouseleave={onleave}
-  bind:offsetWidth={w}
-  bind:offsetHeight={h}
-  style="left:{left}px; top:{top}px"
->
+<Popover {anchor} {pinned} {onenter} {onleave}>
   <div class="enc-header">
     <span class="enc-instr">{@html instrHtml}</span>
     <span class="enc-format">{$_("encoding.format", { values: { format: enc.format } })}</span>
@@ -184,23 +162,9 @@
       <span class="imm-label">= {enc.imm.value}</span>
     </div>
   {/if}
-</div>
+</Popover>
 
 <style>
-  .enc-popover {
-    position: fixed;
-    z-index: 1000;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-    padding: 12px 14px;
-    font-family: var(--mono);
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
   /* Field kind colors, matching the syntax highlighting */
   .k-opcode { --k: var(--red); --k-dim: var(--red-dim); }
   .k-funct { --k: var(--purple); --k-dim: var(--purple-dim); }
@@ -227,9 +191,6 @@
   .enc-hint {
     font-size: 13px;
     color: var(--text-faint);
-  }
-  .enc-popover.pinned {
-    border-color: var(--blue);
   }
   .enc-close {
     background: none;
