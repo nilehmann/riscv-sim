@@ -9,6 +9,8 @@ export class Machine {
   readonly bits: number;
   readonly stackBase: number;
   readonly osMode: boolean;
+  /** Memory regions, `[start, end)`, that are always accessible. */
+  private regions: [number, number][] = [];
 
   constructor(
     readonly isa: Isa,
@@ -48,11 +50,21 @@ export class Machine {
     this.regs[r] = BigInt.asUintN(this.bits, value);
   }
 
-  /** Returns true if addr is a valid (non-faulting) memory address. */
-  checkAccess(addr: number): boolean {
+  /** Makes `[start, end)` accessible in OS mode. */
+  addRegion(start: number, end: number): void {
+    this.regions.push([start, end]);
+  }
+
+  /**
+   * Returns true if the `bytes` bytes at addr are a valid (non-faulting)
+   * access: all inside the stack or all inside one memory region.
+   */
+  checkAccess(addr: number, bytes = 1): boolean {
     if (!this.osMode) return true;
+    const end = addr + bytes;
     const low = Number(this.reg(this.isa.regs.sp)) - this.isa.redZone;
-    return addr >= low && addr < this.stackBase;
+    if (addr >= low && end <= this.stackBase) return true;
+    return this.regions.some(([s, e]) => addr >= s && end <= e);
   }
 
   writeMem(addr: number, value: bigint, bytes: number): void {

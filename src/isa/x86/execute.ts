@@ -59,7 +59,7 @@ export function execute(m: Machine, c: Instr, addr: number, size: number): ExecR
     return Number(BigInt.asUintN(64, a));
   };
   const access = (a: number, bytes: number): void => {
-    if (!m.checkAccess(a) || !m.checkAccess(a + bytes - 1)) throw new MemFault(a);
+    if (!m.checkAccess(a, bytes)) throw new MemFault(a);
     hiSlots.push(slotOf(a));
   };
   const readMem = (a: number, bytes: number): bigint => {

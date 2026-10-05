@@ -17,6 +17,7 @@ export function simulate(
   const machine = new Machine(isa, prog.initialRegs, stackBase, osMode);
 
   for (const region of prog.memoryRegions ?? []) {
+    machine.addRegion(region.addr, region.addr + region.elements.length * region.elementSize);
     for (let i = 0; i < region.elements.length; i++) {
       machine.writeMem(
         region.addr + i * region.elementSize,
