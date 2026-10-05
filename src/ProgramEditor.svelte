@@ -312,6 +312,37 @@
         }
     }
 
+    // ── Dragging the panel by its header ─────────────────────────────────────
+
+    /** Offset of the panel from its centered position. */
+    let drag = $state({ x: 0, y: 0 });
+    let dragStart: { px: number; py: number; x: number; y: number } | null = null;
+    let panelEl = $state<HTMLElement | null>(null);
+
+    function onDragStart(e: PointerEvent) {
+        if (e.button !== 0 || (e.target as Element).closest("button")) return;
+        dragStart = { px: e.clientX, py: e.clientY, ...drag };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        e.preventDefault();
+    }
+
+    function onDragMove(e: PointerEvent) {
+        if (!dragStart || !panelEl) return;
+        let x = dragStart.x + e.clientX - dragStart.px;
+        let y = dragStart.y + e.clientY - dragStart.py;
+        // Keep at least part of the header on screen so it can be dragged back.
+        const r = panelEl.getBoundingClientRect();
+        const left = r.left - drag.x, top = r.top - drag.y;
+        const margin = 80;
+        x = Math.min(Math.max(x, margin - left - r.width), window.innerWidth - margin - left);
+        y = Math.min(Math.max(y, -top), window.innerHeight - 48 - top);
+        drag = { x, y };
+    }
+
+    function onDragEnd() {
+        dragStart = null;
+    }
+
     function load() {
         loadError = null;
         if (regInvalidIdxs.size > 0) {
@@ -383,8 +414,19 @@
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div class="backdrop" onclick={() => (ui.showEditor = false)}>
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="panel" onclick={(e) => e.stopPropagation()}>
-        <div class="panel-header">
+    <div
+        class="panel"
+        bind:this={panelEl}
+        style="transform: translate({drag.x}px, {drag.y}px)"
+        onclick={(e) => e.stopPropagation()}
+    >
+        <div
+            class="panel-header"
+            onpointerdown={onDragStart}
+            onpointermove={onDragMove}
+            onpointerup={onDragEnd}
+            onpointercancel={onDragEnd}
+        >
             <span class="panel-title">{$_('editor.title')}</span>
             <button class="close-btn" onclick={() => (ui.showEditor = false)}>×</button>
         </div>
@@ -593,6 +635,9 @@
         padding: 18px 20px 16px;
         border-bottom: 1px solid var(--border);
         flex-shrink: 0;
+        cursor: move;
+        user-select: none;
+        touch-action: none;
     }
     .panel-title {
         font-family: var(--sans);
