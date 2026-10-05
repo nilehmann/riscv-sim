@@ -64,6 +64,8 @@
         {@const leaf = cell.leaf}
         {@const size = leaf.size as 1 | 2 | 4 | 8}
         {@const mode = slotMode(leaf)}
+        {@const picker = !leaf.pad && size > 1 ? 1 : 0}
+        {@const pieces = leaf.pad || mode === size ? [{ addr: leaf.addr, size }] : subSlots(leaf.addr, size, mode as 1 | 2 | 4)}
         <div
           class="region-slot"
           class:pad={leaf.pad}
@@ -74,42 +76,31 @@
           class:hi={isAccessed(leaf, access)}
           style="grid-row:1;grid-column:{cell.col}"
         >
-          {#if leaf.pad}
-            <div class="slot-meta"><span class="slot-addr">{fmtAddr(leaf.addr)}</span></div>
-            <div class="word-val"><span class="pad-val">··</span></div>
-          {:else if mode === size}
-            <div class="slot-meta">
-              {#if size > 1}
+          <!-- Same grid in every mode, so addresses and values line up across slots. -->
+          <div class="slot-grid" style="grid-template-columns:{picker ? "auto " : ""}repeat({pieces.length}, auto)">
+            <div class="meta-line"></div>
+            {#if picker}
+              <div class="mode-cell">
                 <SlotMode {mode} {size} onchange={(m) => setSlotMode(leaf, m)} />
-              {/if}
-              <span class="slot-addr">{fmtAddr(leaf.addr)}</span>
-            </div>
-            <div class="word-val">
-              <HexValue
-                value={read(leaf.addr, size)}
-                elementSize={size}
-                path={leaf.path}
-                offset={leaf.addr - region.addr}
-              />
-            </div>
-          {:else}
-            <div class="slot-expanded">
-              <SlotMode {mode} {size} onchange={(m) => setSlotMode(leaf, m)} />
-              <div class="pairs-grid">
-                {#each subSlots(leaf.addr, size, mode as 1 | 2 | 4) as sub}
-                  <span class="sub-grid-addr">{fmtAddr(sub.addr)}</span>
-                  <div class="val-cell">
-                    <HexValue
-                      value={read(sub.addr, sub.size)}
-                      elementSize={sub.size}
-                      path={leaf.path}
-                      offset={sub.addr - region.addr}
-                    />
-                  </div>
-                {/each}
               </div>
-            </div>
-          {/if}
+            {/if}
+            {#each pieces as piece, i}
+              <span class="slot-addr" style="grid-row:1;grid-column:{i + 1 + picker}">{fmtAddr(piece.addr)}</span>
+              <!-- A whole value also extends under the size picker. -->
+              <div class="val-cell" style="grid-row:2;grid-column:{pieces.length === 1 ? "1 / -1" : i + 1 + picker}">
+                {#if leaf.pad}
+                  <span class="pad-val">··</span>
+                {:else}
+                  <HexValue
+                    value={read(piece.addr, piece.size)}
+                    elementSize={piece.size as 1 | 2 | 4 | 8}
+                    path={leaf.path}
+                    offset={piece.addr - region.addr}
+                  />
+                {/if}
+              </div>
+            {/each}
+          </div>
         </div>
         {#if cell.labelled}
           <div class="leaf-label" class:pad-label={leaf.pad} style="grid-row:2;grid-column:{cell.col}">
@@ -211,49 +202,36 @@
   .region-slot.hi::after {
     animation: slot-flash 0.8s ease-out forwards;
   }
-  .slot-meta {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
+  .slot-grid {
+    display: grid;
+    grid-template-rows: 24px 20px;
+    column-gap: 8px;
+    row-gap: 4px;
     width: 100%;
+  }
+  .meta-line {
+    grid-row: 1;
+    grid-column: 1 / -1;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 4px;
+  }
+  .mode-cell {
+    grid-row: 1;
+    grid-column: 1;
+    display: flex;
+    align-items: center;
+    padding-bottom: 1px;
   }
   .slot-addr {
     font-family: var(--mono);
     font-size: 12px;
     color: var(--text-faint);
     white-space: nowrap;
-  }
-  .word-val {
-    display: flex;
-    justify-content: flex-end;
-    width: 100%;
-  }
-  .slot-expanded {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 8px;
-    width: 100%;
-  }
-  .pairs-grid {
-    display: grid;
-    grid-auto-flow: column;
-    grid-template-rows: auto auto;
-    column-gap: 8px;
-    row-gap: 4px;
-  }
-  .sub-grid-addr {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-faint);
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 4px;
+    align-self: center;
+    padding-bottom: 1px;
   }
   .val-cell {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
   }
 
