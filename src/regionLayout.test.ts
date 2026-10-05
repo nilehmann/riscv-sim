@@ -1,5 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { layoutRegion, isAccessed } from "./regionLayout";
+import { overlapsAccess } from "./memUtils";
 import { parseTypes, parseDecl, buildTree, leavesOf } from "./ctypes";
 import type { TypedNode } from "./ctypes";
 import { AppError } from "./types";
@@ -95,5 +96,14 @@ describe("isAccessed", () => {
     expect(isAccessed(x!, access)).toBe(false);
     expect(isAccessed(y!, access)).toBe(true);
     expect(isAccessed(y!, undefined)).toBe(false);
+  });
+});
+
+describe("overlapsAccess", () => {
+  test("only the pieces a narrow access touches", () => {
+    const access = [{ addr: 0x10009, size: 1, kind: "store" as const }];
+    const bytes = [0, 1, 2, 3].map((i) => overlapsAccess(0x10008 + i, 1, access));
+    expect(bytes).toEqual([false, true, false, false]);
+    expect([0, 2].map((i) => overlapsAccess(0x10008 + i, 2, access))).toEqual([true, false]);
   });
 });

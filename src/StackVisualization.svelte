@@ -339,9 +339,10 @@
                     >
                         {#each frameSlots as addr}
                             {@const memVal = getSlotMemVal(addr)}
-                            {@const isHi = hiS.has(addr)}
                             {@const key = slotKey(addr)}
                             {@const mode = slotMode(addr)}
+                            <!-- A split slot flashes only its accessed pieces (in StackSlot). -->
+                            {@const isHi = hiS.has(addr) && mode === S}
                             {@const gWord = garbageMem(addr, S)}
                             <div
                                 class="frame-slot"
@@ -373,7 +374,7 @@
                             {@const key = slotKey(addr)}
                             <div
                                 class="frame-slot"
-                                class:hi={hiS.has(addr)}
+                                class:hi={hiS.has(addr) && slotMode(addr) === S}
                                 id="slot-{addr.toString(16)}"
                                 use:registerSlotAction={addr}
                             >

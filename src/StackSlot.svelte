@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { SlotLabel } from "./types";
     import { sim, ui } from "./state.svelte";
-    import { subSlots, readWritten } from "./memUtils";
+    import { subSlots, readWritten, overlapsAccess } from "./memUtils";
     import { fmtAddr } from "./types";
     import HexValue from "./HexValue.svelte";
     import SlotMode from "./SlotMode.svelte";
@@ -48,7 +48,11 @@
                 {@const subVal = step ? readWritten(step.mem, sub.addr, sub.size) : undefined}
                 {@const byteOff = sub.addr - addr}
                 {@const subGarbage = BigInt.asUintN(sub.size * 8, gWord >> BigInt(byteOff * 8))}
-                <div class="sub-slot" data-addr={sub.addr}>
+                <div
+                    class="sub-slot"
+                    class:hi={overlapsAccess(sub.addr, sub.size, step?.access)}
+                    data-addr={sub.addr}
+                >
                     <span class="slot-name">{name(sub.addr)}</span>
                     {#if subVal !== undefined}
                         <HexValue value={subVal} elementSize={sub.size} faint={faint} />
@@ -86,11 +90,28 @@
         flex: 1;
     }
     .sub-slot {
+        position: relative;
         display: flex;
         flex-direction: row;
         justify-content: space-between;
         align-items: center;
         width: 100%;
+    }
+    .sub-slot::after {
+        content: "";
+        position: absolute;
+        /* Out to the slot's right padding. */
+        inset: -2px -16px -2px -4px;
+        background: var(--orange-dim);
+        opacity: 0;
+        pointer-events: none;
+    }
+    @keyframes sub-slot-flash {
+        0% { opacity: 1; }
+        100% { opacity: 0; }
+    }
+    .sub-slot.hi::after {
+        animation: sub-slot-flash 0.8s ease-out forwards;
     }
     .slot-name {
         color: var(--text-dim);

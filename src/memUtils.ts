@@ -1,3 +1,12 @@
+/** Whether the `size` bytes at addr overlap any of the accesses. */
+export function overlapsAccess(
+    addr: number,
+    size: number,
+    access: readonly { addr: number; size: number }[] | undefined,
+): boolean {
+    return access?.some((a) => a.addr < addr + size && addr < a.addr + a.size) ?? false;
+}
+
 /** Splits a slot of `nativeBytes` into pieces of `subSize` bytes, lowest address first. */
 export function subSlots<S extends number>(addr: number, nativeBytes: number, subSize: S) {
     return Array.from({ length: nativeBytes / subSize }, (_, i) => ({

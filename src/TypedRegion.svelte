@@ -5,7 +5,7 @@
   import { typeName, leavesOf } from "./ctypes";
   import type { TypedNode } from "./ctypes";
   import { layoutRegion, isAccessed } from "./regionLayout";
-  import { subSlots, readWritten } from "./memUtils";
+  import { subSlots, readWritten, overlapsAccess } from "./memUtils";
   import { garbageMem } from "./garbage";
   import HexValue from "./HexValue.svelte";
   import SlotMode from "./SlotMode.svelte";
@@ -167,7 +167,7 @@
           class:first={cell.col === 1}
           class:outer-start={cell.outerStart}
           class:inner-start={cell.innerStart}
-          class:hi={isAccessed(leaf, access)}
+          class:hi={pieces.length === 1 && isAccessed(leaf, access)}
           style="grid-row:1;grid-column:{cell.col}"
           data-ptr-addr={pieces.length === 1 ? leaf.addr : undefined}
           data-ptr-size={pieces.length === 1 ? leaf.size : undefined}
@@ -187,6 +187,14 @@
                 data-ptr-addr={pieces.length > 1 ? piece.addr : undefined}
                 data-ptr-size={pieces.length > 1 ? piece.size : undefined}
               >{fmtAddr(piece.addr)}</span>
+              {#if pieces.length > 1}
+                <!-- A split slot flashes only the pieces the access touched. -->
+                <div
+                  class="piece-hi"
+                  class:hi={overlapsAccess(piece.addr, piece.size, access)}
+                  style="grid-column:{i + 1 + picker}"
+                ></div>
+              {/if}
               <!-- A whole value also extends under the size picker. -->
               <div class="val-cell" style="grid-row:2;grid-column:{pieces.length === 1 ? "1 / -1" : i + 1 + picker}">
                 {#if leaf.pad}
@@ -356,6 +364,17 @@
     100% { opacity: 0; }
   }
   .region-slot.hi::after {
+    animation: slot-flash 0.8s ease-out forwards;
+  }
+  .piece-hi {
+    grid-row: 1 / -1;
+    /* Out to the slot's top/bottom padding and halfway into the column gaps. */
+    margin: -6px -4px;
+    background: var(--orange-dim);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .piece-hi.hi {
     animation: slot-flash 0.8s ease-out forwards;
   }
   .slot-grid {

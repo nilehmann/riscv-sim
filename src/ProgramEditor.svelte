@@ -480,15 +480,6 @@
                 </div>
             {/if}
 
-            <!-- Struct definitions used by the regions -->
-            <div class="field">
-                <label class="field-label">{$_('editor.types')}</label>
-                <div class="asm-editor-wrap types-editor-wrap" bind:this={typesContainer}></div>
-                {#if typesEnv instanceof AppError}
-                    <div class="field-error">{typesEnv.message}</div>
-                {/if}
-            </div>
-
             <!-- Memory regions -->
             <div class="field">
                 <label class="field-label">{$_('editor.memory_regions')}</label>
@@ -551,6 +542,15 @@
                     {/each}
                     <button class="add-reg-btn" onclick={addRegion}>{$_('editor.add_region')}</button>
                 </div>
+            </div>
+
+            <!-- Struct definitions used by the regions -->
+            <div class="field">
+                <label class="field-label">{$_('editor.types')}</label>
+                <div class="asm-editor-wrap types-editor-wrap" bind:this={typesContainer}></div>
+                {#if typesEnv instanceof AppError}
+                    <div class="field-error">{typesEnv.message}</div>
+                {/if}
             </div>
 
             {#if loadError}

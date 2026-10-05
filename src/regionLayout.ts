@@ -1,6 +1,7 @@
 import type { TypedNode } from "./ctypes";
 import { leavesOf, internalNodes } from "./ctypes";
 import type { MemAccess } from "./isa/types";
+import { overlapsAccess } from "./memUtils";
 
 // ─── Grid layout of a typed memory region ─────────────────────────────────
 // All leaf values sit in one row (one grid column each). Every struct/array
@@ -114,6 +115,5 @@ export function layoutRegion(
 
 /** Whether a leaf overlaps any of the accesses. */
 export function isAccessed(leaf: TypedNode, access: readonly MemAccess[] | undefined): boolean {
-  if (!access) return false;
-  return access.some((a) => a.addr < leaf.addr + leaf.size && leaf.addr < a.addr + a.size);
+  return overlapsAccess(leaf.addr, leaf.size, access);
 }
