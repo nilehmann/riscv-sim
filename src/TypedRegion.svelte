@@ -375,7 +375,10 @@
     grid-column: 1;
     display: flex;
     align-items: center;
-    padding-bottom: 1px;
+  }
+  /* The picker is inline-block, which sits its button on the text baseline. */
+  .mode-cell :global(.slot-picker) {
+    display: flex;
   }
   .slot-addr {
     font-family: var(--mono);
