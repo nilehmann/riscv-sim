@@ -66,12 +66,21 @@ export type ControlFlow =
   | { kind: "call"; returnAddr: number }
   | { kind: "jump" };
 
+/** One memory read or write, at its exact address and size. */
+export interface MemAccess {
+  addr: number;
+  size: number;
+  kind: "load" | "store";
+}
+
 export interface ExecResult {
   /** Address of the next instruction. */
   next: number;
   hiReg?: string[];
   hiSlots?: number[];
   store?: StoreInfo;
+  /** Memory accesses, in the order they happened. */
+  access?: MemAccess[];
   fault?: Fault;
   control?: ControlFlow;
 }

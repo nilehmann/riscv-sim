@@ -222,3 +222,31 @@ describe("stack and calls", () => {
     expect(d.callFramesByStep[steps.length - 1]!.map((f) => f.label)).toEqual(["main"]);
   });
 });
+
+describe("memory access", () => {
+  const step = (assembly: string, i: number, extra: Partial<Program> = {}) =>
+    load(assembly, { initialRegs: { rsp: SP, rbp: SP - 0x10, rax: SP - 0x20 }, ...extra }).steps[i]!;
+
+  test("a 4-byte store", () => {
+    expect(step("mov DWORD PTR [rbp-4], edi", 1).access).toEqual([
+      { addr: SP - 0x14, size: 4, kind: "store" },
+    ]);
+  });
+  test("push is one 8-byte store", () => {
+    expect(step("push rbp", 1).access).toEqual([{ addr: SP - 8, size: 8, kind: "store" }]);
+  });
+  test("pop is one 8-byte load", () => {
+    expect(step("push rbp\npop rbp", 2).access).toEqual([{ addr: SP - 8, size: 8, kind: "load" }]);
+  });
+  test("read-modify-write is a load and a store", () => {
+    expect(step("add DWORD PTR [rax], 1", 1).access).toEqual([
+      { addr: SP - 0x20, size: 4, kind: "load" },
+      { addr: SP - 0x20, size: 4, kind: "store" },
+    ]);
+  });
+  test("call is a store, ret a load", () => {
+    const s = load("f:\n    ret\ng:\n    call f", { entryPoint: "g", returnAddress: 0x401200 }).steps;
+    expect(s[1]!.access).toEqual([{ addr: SP - 8, size: 8, kind: "store" }]);
+    expect(s[2]!.access).toEqual([{ addr: SP - 8, size: 8, kind: "load" }]);
+  });
+});

@@ -1,4 +1,4 @@
-import type { ControlFlow, Fault, IsaId, StoreInfo } from "./isa/types";
+import type { ControlFlow, Fault, IsaId, MemAccess, StoreInfo } from "./isa/types";
 import type { CType, TypedNode, Value } from "./ctypes";
 
 export const hx = (v: number | bigint, bytes: 1 | 2 | 4 | 6 | 8 = 4): string => {
@@ -117,6 +117,8 @@ export interface Step {
   mem: Map<number, number>;
   hiSlots: number[];
   store?: StoreInfo;
+  /** Exact memory accesses of this step's instruction. */
+  access?: MemAccess[];
   fault?: Fault;
   /** Control transfer done by the instruction of this step, if any. */
   control?: ControlFlow;

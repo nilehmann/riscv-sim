@@ -64,6 +64,7 @@ export function simulate(
         hiReg: r.hiReg ?? [],
         hiSlots: r.hiSlots ?? [],
         store: r.store,
+        access: r.access,
         control: r.control,
       });
     }

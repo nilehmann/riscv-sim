@@ -87,17 +87,22 @@ export function execute(m: Machine, c: Instr, addr: number): ExecResult {
     case "sw": case "sh": case "sb": {
       const a = effAddr(c.rs1, c.offset);
       if (!m.checkAccess(a, STORE_SIZE[c.op])) return { next, fault: { type: "segfault", addr: a } };
-      m.writeMem(a, r(c.rs2), STORE_SIZE[c.op]);
+      const size = STORE_SIZE[c.op];
+      m.writeMem(a, r(c.rs2), size);
       const slot = wordOf(a);
-      return { next, hiSlots: [slot], store: { addr: slot, reg: c.rs2, size: 4 } };
+      return {
+        next, hiSlots: [slot], store: { addr: slot, reg: c.rs2, size: 4 },
+        access: [{ addr: a, size, kind: "store" }],
+      };
     }
 
     case "lw": case "lh": case "lb": case "lhu": case "lbu": {
       const a = effAddr(c.rs1, c.offset);
       if (!m.checkAccess(a, LOAD_SIZE[c.op])) return { next, fault: { type: "segfault", addr: a } };
       const signed = c.op === "lh" || c.op === "lb";
-      m.writeReg(c.rd, m.readMem(a, LOAD_SIZE[c.op], signed));
-      return { next, hiReg: [c.rd], hiSlots: [wordOf(a)] };
+      const size = LOAD_SIZE[c.op];
+      m.writeReg(c.rd, m.readMem(a, size, signed));
+      return { next, hiReg: [c.rd], hiSlots: [wordOf(a)], access: [{ addr: a, size, kind: "load" }] };
     }
 
     case "beq": case "bne": case "blt": case "bge": case "bltu": case "bgeu": {

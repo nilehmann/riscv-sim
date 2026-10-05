@@ -1,5 +1,5 @@
 import type { Instr, MemOp, Operand, Size } from "./types";
-import type { ExecResult, StoreInfo } from "../types";
+import type { ExecResult, MemAccess, StoreInfo } from "../types";
 import type { Machine } from "../../machine";
 import { REGS, condOf } from "./types";
 
@@ -32,6 +32,7 @@ export function execute(m: Machine, c: Instr, addr: number, size: number): ExecR
   const next = addr + size;
   const hiReg: string[] = [];
   const hiSlots: number[] = [];
+  const accesses: MemAccess[] = [];
   let store: StoreInfo | undefined;
 
   // ── Registers: narrower names are views of the 64-bit register ──
@@ -58,16 +59,17 @@ export function execute(m: Machine, c: Instr, addr: number, size: number): ExecR
     if (o.index) a += m.reg(o.index) * BigInt(o.scale);
     return Number(BigInt.asUintN(64, a));
   };
-  const access = (a: number, bytes: number): void => {
+  const access = (a: number, bytes: number, kind: MemAccess["kind"]): void => {
     if (!m.checkAccess(a, bytes)) throw new MemFault(a);
     hiSlots.push(slotOf(a));
+    accesses.push({ addr: a, size: bytes, kind });
   };
   const readMem = (a: number, bytes: number): bigint => {
-    access(a, bytes);
+    access(a, bytes, "load");
     return m.readMem(a, bytes, false);
   };
   const writeMem = (a: number, value: bigint, bytes: number, label: string): void => {
-    access(a, bytes);
+    access(a, bytes, "store");
     m.writeMem(a, value, bytes);
     store = { addr: a, reg: label, size: bytes };
   };
@@ -162,7 +164,7 @@ export function execute(m: Machine, c: Instr, addr: number, size: number): ExecR
   };
 
   const done = (extra: Partial<ExecResult> = {}): ExecResult => ({
-    next, hiReg, hiSlots: [...new Set(hiSlots)], store, ...extra,
+    next, hiReg, hiSlots: [...new Set(hiSlots)], store, access: accesses, ...extra,
   });
 
   try {
