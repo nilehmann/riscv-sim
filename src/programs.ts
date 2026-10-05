@@ -199,6 +199,204 @@ foo:
     ret`,
   },
   {
+    name: "Struct field",
+    entryPoint: "get_y",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
+    baseAddress: 0x8000,
+    showStack: false,
+    types: `typedef struct {
+  int x;
+  int y;
+} Point;`,
+    memoryRegions: [
+      { addr: 0x10000, decl: "Point pts[3]", init: [{ x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 6 }] },
+    ],
+    cCode: `\
+typedef struct {
+  int x;
+  int y;
+} Point;
+
+Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};
+
+int get_y(Point *pts, int i) {
+  return pts[i].y;
+}`,
+    assembly: `\
+get_y:
+    slli    a1, a1, 3
+    add     a0, a0, a1
+    lw      a0, 4(a0)
+    ret`,
+  },
+  {
+    name: "Struct padding",
+    entryPoint: "get_x",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
+    baseAddress: 0x8000,
+    showStack: false,
+    types: `struct S {
+  char c;   // +0
+  int  x;   // +4 (3 bytes padding)
+};`,
+    memoryRegions: [
+      { addr: 0x10000, decl: "struct S s[2]", init: [{ c: 0x41, x: 7 }, { c: 0x42, x: 9 }] },
+    ],
+    cCode: `\
+struct S {
+  char c;   // +0
+  int  x;   // +4 (3 bytes padding)
+};
+
+struct S s[2] = {{'A', 7}, {'B', 9}};
+
+int get_x(struct S *s, int i) {
+  return s[i].x;
+}`,
+    assembly: `\
+get_x:
+    slli    a1, a1, 3
+    add     a0, a0, a1
+    lw      a0, 4(a0)
+    ret`,
+  },
+  {
+    name: "Nested struct",
+    entryPoint: "top",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
+    baseAddress: 0x8000,
+    showStack: false,
+    types: `typedef struct {
+  int x;
+  int y;
+} Point;
+
+typedef struct {
+  Point min;   // +0
+  Point max;   // +8
+} Rect;`,
+    memoryRegions: [
+      {
+        addr: 0x10000,
+        decl: "Rect rects[2]",
+        init: [
+          { min: { x: 0, y: 0 }, max: { x: 4, y: 3 } },
+          { min: { x: 1, y: 1 }, max: { x: 9, y: 7 } },
+        ],
+      },
+    ],
+    cCode: `\
+typedef struct {
+  int x;
+  int y;
+} Point;
+
+typedef struct {
+  Point min;   // +0
+  Point max;   // +8
+} Rect;
+
+Rect rects[2] = {{{0, 0}, {4, 3}}, {{1, 1}, {9, 7}}};
+
+int top(Rect *r, int i) {
+  return r[i].max.y;   // 8 + 4 = 12
+}`,
+    assembly: `\
+top:
+    slli    a1, a1, 4
+    add     a0, a0, a1
+    lw      a0, 12(a0)
+    ret`,
+  },
+  {
+    name: "Padding before a nested struct",
+    entryPoint: "get",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
+    baseAddress: 0x8000,
+    showStack: false,
+    types: `typedef struct {
+  int x;
+  int y;
+} Point;
+
+struct Item {
+  char  kind;  // +0, then 3 bytes padding
+  Point pos;   // +4 (Point is 4-aligned)
+};`,
+    memoryRegions: [
+      {
+        addr: 0x10000,
+        decl: "struct Item items[2]",
+        init: [{ kind: 0x61, pos: { x: 5, y: 6 } }, { kind: 0x62, pos: { x: 7, y: 8 } }],
+      },
+    ],
+    cCode: `\
+typedef struct {
+  int x;
+  int y;
+} Point;
+
+struct Item {
+  char  kind;  // +0, then 3 bytes padding
+  Point pos;   // +4 (Point is 4-aligned)
+};             // sizeof = 12
+
+struct Item items[2] = {{'a', {5, 6}}, {'b', {7, 8}}};
+
+int get(struct Item *it, int i) {
+  return it[i].pos.y;  // 4 + 4 = 8
+}`,
+    assembly: `\
+get:
+    slli    a5, a1, 1
+    add     a5, a5, a1
+    slli    a5, a5, 2
+    add     a0, a0, a5
+    lw      a0, 8(a0)
+    ret`,
+  },
+  {
+    name: "Array in struct",
+    entryPoint: "get",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
+    baseAddress: 0x8000,
+    showStack: false,
+    types: `typedef struct {
+  int x;
+  int y;
+} Point;
+
+typedef struct {
+  int   n;      // +0
+  Point v[2];   // +4
+} Poly;`,
+    memoryRegions: [
+      { addr: 0x10000, decl: "Poly poly", init: { n: 2, v: [{ x: 1, y: 2 }, { x: 3, y: 4 }] } },
+    ],
+    cCode: `\
+typedef struct {
+  int x;
+  int y;
+} Point;
+
+typedef struct {
+  int   n;      // +0
+  Point v[2];   // +4
+} Poly;
+
+Poly poly = {2, {{1, 2}, {3, 4}}};
+
+int get(Poly *p, int i) {
+  return p->v[i].y;   // 4 + i*8 + 4
+}`,
+    assembly: `\
+get:
+    slli    a1, a1, 3
+    add     a0, a0, a1
+    lw      a0, 8(a0)
+    ret`,
+  },
+  {
     name: "Store a byte",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000 },

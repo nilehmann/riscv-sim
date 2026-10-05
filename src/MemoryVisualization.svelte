@@ -1,73 +1,12 @@
 <script lang="ts">
-  import { sim, ui } from "./state.svelte";
-  import { leavesOf } from "./ctypes";
-  import { fmtAddr } from "./types";
-  import { subSlots, readBytes } from "./memUtils";
-  import HexValue from "./HexValue.svelte";
-  import SlotMode from "./SlotMode.svelte";
-
-  function isHighlighted(addr: number): boolean {
-    const wordAddr = addr - (addr % 4);
-    return sim.currentStep?.hiSlots.includes(wordAddr) ?? false;
-  }
-
-
-  function slotMode(key: string, def: number): number {
-    return ui.slotViewMode.get(key) ?? def;
-  }
-
-  function setSlotMode(key: string, mode: number) {
-    const next = new Map(ui.slotViewMode);
-    next.set(key, mode);
-    ui.slotViewMode = next;
-  }
+  import { sim } from "./state.svelte";
+  import TypedRegion from "./TypedRegion.svelte";
 </script>
 
 {#if sim.regions.length}
   <div class="memory-panel">
-    {#each sim.regions as region}
-      <div class="region-card">
-        <div class="region-slots">
-          {#each leavesOf(region.root).filter((l) => !l.pad) as leaf, i}
-            {@const elemAddr = leaf.addr}
-            {@const nativeSize = leaf.size as 1 | 2 | 4}
-            {@const key = `mem-${region.addr}-${i}`}
-            {@const defaultMode = nativeSize}
-            {@const mode = slotMode(key, defaultMode)}
-            <div class="region-slot" class:hi={isHighlighted(elemAddr)}>
-              {#if mode === defaultMode}
-                <div class="slot-meta">
-                  {#if nativeSize > 1}
-                    <SlotMode {mode} size={nativeSize} onchange={(m) => setSlotMode(key, m)} />
-                  {/if}
-                  <span class="slot-addr">{fmtAddr(elemAddr)}</span>
-                  <span class="slot-idx">[{i}]</span>
-                </div>
-                <div class="word-val">
-                  <HexValue value={readBytes(sim.currentStep?.mem ?? new Map(), elemAddr, nativeSize)} elementSize={nativeSize} />
-                </div>
-              {:else}
-                <div class="slot-expanded">
-                  {#if nativeSize > 1}
-                    <SlotMode {mode} size={nativeSize} onchange={(m) => setSlotMode(key, m)} />
-                  {/if}
-                  <div class="pairs-grid">
-                    {#each subSlots(elemAddr, nativeSize, mode as 1 | 2) as sub}
-                      <span class="sub-grid-addr">{fmtAddr(sub.addr)}</span>
-                      <div class="val-cell">
-                        <HexValue
-                          value={readBytes(sim.currentStep?.mem ?? new Map(), sub.addr, sub.size)}
-                          elementSize={sub.size}
-                        />
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      </div>
+    {#each sim.regions as region (region.name)}
+      <TypedRegion {region} />
     {/each}
   </div>
 {/if}
@@ -75,99 +14,11 @@
 <style>
   .memory-panel {
     display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
+    flex-direction: column;
+    gap: 20px;
     padding: 16px 24px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
-  }
-  .region-card {
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--border);
-  }
-  .region-slots {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-  }
-  .region-slot {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    padding: 6px 10px;
-    border-right: 1px solid var(--border);
-    background: var(--surface);
-    position: relative;
-    min-width: 140px;
-    gap: 4px;
-  }
-  .region-slot:last-child {
-    border-right: none;
-  }
-  .region-slot::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: var(--orange-dim);
-    opacity: 0;
-    pointer-events: none;
-  }
-  @keyframes slot-flash {
-    0% { opacity: 1; }
-    100% { opacity: 0; }
-  }
-  .region-slot.hi::after {
-    animation: slot-flash 0.8s ease-out forwards;
-  }
-  .slot-meta {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 4px;
-  }
-  .slot-addr {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-faint);
-  }
-  .slot-idx {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-faint);
-  }
-
-  .word-val {
-    display: flex;
-    justify-content: flex-end;
-    width: 100%;
-  }
-  .slot-expanded {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    gap: 8px;
-    width: 100%;
-  }
-  .pairs-grid {
-    display: grid;
-    grid-auto-flow: column;
-    grid-template-rows: auto auto;
-    column-gap: 8px;
-    row-gap: 4px;
-  }
-  .sub-grid-addr {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-faint);
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 4px;
-  }
-  .val-cell {
-    display: flex;
-    justify-content: flex-end;
+    min-width: 0;
   }
 </style>

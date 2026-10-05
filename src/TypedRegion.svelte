@@ -1,0 +1,290 @@
+<script lang="ts">
+  import type { ResolvedRegion } from "./types";
+  import { sim, ui } from "./state.svelte";
+  import { fmtAddr } from "./types";
+  import { typeName, leavesOf } from "./ctypes";
+  import type { TypedNode } from "./ctypes";
+  import { layoutRegion, isAccessed } from "./regionLayout";
+  import { subSlots, readWritten } from "./memUtils";
+  import HexValue from "./HexValue.svelte";
+  import SlotMode from "./SlotMode.svelte";
+
+  let { region }: { region: ResolvedRegion } = $props();
+
+  const open = $derived(new Set<string>());
+  const layout = $derived(layoutRegion(region.root, open, fmtAddr));
+  const access = $derived(sim.currentStep?.access);
+
+  const title = $derived.by(() => {
+    const t = region.type;
+    const elem = t.kind === "array" ? t.elem : t;
+    return { decl: typeName(t), size: `sizeof(${typeName(elem)}) = ${region.size / (t.kind === "array" ? t.len : 1)}` };
+  });
+
+  const rows = $derived(
+    ["auto", ...(layout.labelRow ? ["auto"] : []), ...Array(layout.footerRows).fill("30px")].join(" "),
+  );
+
+  const read = (addr: number, size: number): bigint =>
+    readWritten(sim.currentStep?.mem ?? new Map(), addr, size) ?? 0n;
+
+  /** The outermost card containing an accessed leaf gets an orange border. */
+  const accessedCard = (n: TypedNode) => leavesOf(n).some((l) => isAccessed(l, access));
+
+  const slotKey = (leaf: TypedNode) => `mem-${region.name}-${leaf.path}`;
+  function slotMode(leaf: TypedNode): number {
+    return ui.slotViewMode.get(slotKey(leaf)) ?? leaf.size;
+  }
+  function setSlotMode(leaf: TypedNode, mode: number) {
+    const next = new Map(ui.slotViewMode);
+    next.set(slotKey(leaf), mode);
+    ui.slotViewMode = next;
+  }
+</script>
+
+<div class="region">
+  <div class="region-title">
+    <span><b>{region.name}</b> : {title.decl}</span>
+    <span>@ {fmtAddr(region.addr)}</span>
+    <span>{title.size}</span>
+  </div>
+  <div class="region-scroll">
+    <div class="region-grid" style="grid-template-rows:{rows}">
+      {#each layout.leaves as cell (cell.leaf.path)}
+        {@const leaf = cell.leaf}
+        {@const size = leaf.size as 1 | 2 | 4 | 8}
+        {@const mode = slotMode(leaf)}
+        <div
+          class="region-slot"
+          class:pad={leaf.pad}
+          class:narrow={leaf.pad || size === 1}
+          class:first={cell.col === 1}
+          class:outer-start={cell.outerStart}
+          class:inner-start={cell.innerStart}
+          class:hi={isAccessed(leaf, access)}
+          style="grid-row:1;grid-column:{cell.col}"
+        >
+          {#if leaf.pad}
+            <div class="slot-meta"><span class="slot-addr">{fmtAddr(leaf.addr)}</span></div>
+            <div class="word-val"><span class="pad-val">··</span></div>
+          {:else if mode === size}
+            <div class="slot-meta">
+              {#if size > 1}
+                <SlotMode {mode} {size} onchange={(m) => setSlotMode(leaf, m)} />
+              {/if}
+              <span class="slot-addr">{fmtAddr(leaf.addr)}</span>
+            </div>
+            <div class="word-val">
+              <HexValue value={read(leaf.addr, size)} elementSize={size} />
+            </div>
+          {:else}
+            <div class="slot-expanded">
+              <SlotMode {mode} {size} onchange={(m) => setSlotMode(leaf, m)} />
+              <div class="pairs-grid">
+                {#each subSlots(leaf.addr, size, mode as 1 | 2 | 4) as sub}
+                  <span class="sub-grid-addr">{fmtAddr(sub.addr)}</span>
+                  <div class="val-cell">
+                    <HexValue value={read(sub.addr, sub.size)} elementSize={sub.size} />
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+        {#if cell.labelled}
+          <div class="leaf-label" class:pad-label={leaf.pad} style="grid-row:2;grid-column:{cell.col}">
+            {leaf.label}
+          </div>
+        {/if}
+      {/each}
+      {#each layout.cards as card (card.node.path)}
+        <div
+          class="card"
+          class:inner={!card.outer}
+          class:accessed={card.outer && accessedCard(card.node)}
+          style="grid-row:1 / {card.lastRow + 1};grid-column:{card.col} / span {card.span};z-index:{1 + card.node.depth}"
+        >
+          <span class="toggle"><span class="chev">{card.open ? "▾" : "▸"}</span>{card.node.label}</span>
+          <span class="where">{card.where}</span>
+        </div>
+      {/each}
+    </div>
+  </div>
+</div>
+
+<style>
+  .region {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .region-title {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .region-title b {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .region-scroll {
+    overflow-x: auto;
+  }
+  .region-grid {
+    display: grid;
+    width: max-content;
+  }
+
+  /* ── Value slots ── */
+  .region-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 6px 10px;
+    background: var(--surface);
+    position: relative;
+    min-width: 120px;
+    gap: 4px;
+    border: 1px solid var(--border);
+    border-left-width: 0;
+  }
+  .region-slot.narrow {
+    min-width: 96px;
+  }
+  .region-slot.first {
+    border-left-width: 1px;
+  }
+  .region-slot.inner-start {
+    border-left: 1px dashed var(--text-faint);
+  }
+  .region-slot.pad {
+    background-image: repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--text) 8%, transparent) 0 4px,
+      transparent 4px 8px
+    );
+  }
+  .pad-val {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-faint);
+  }
+  .region-slot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--orange-dim);
+    opacity: 0;
+    pointer-events: none;
+  }
+  @keyframes slot-flash {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .region-slot.hi::after {
+    animation: slot-flash 0.8s ease-out forwards;
+  }
+  .slot-meta {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+  }
+  .slot-addr {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-faint);
+    white-space: nowrap;
+  }
+  .word-val {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .slot-expanded {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+  }
+  .pairs-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: auto auto;
+    column-gap: 8px;
+    row-gap: 4px;
+  }
+  .sub-grid-addr {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-faint);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+  }
+  .val-cell {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  /* ── Leaf names ── */
+  .leaf-label {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--blue);
+    text-align: center;
+    padding: 5px 4px 3px;
+    white-space: nowrap;
+  }
+  .leaf-label.pad-label {
+    color: var(--text-faint);
+  }
+
+  /* ── Cards ── */
+  .card {
+    border: 1.5px solid var(--text-faint);
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 0 8px 5px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-faint);
+    pointer-events: none;
+    min-width: 0;
+  }
+  .card.inner {
+    border: 1px dashed var(--text-faint);
+  }
+  .card.accessed {
+    border-color: var(--orange);
+  }
+  .toggle {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    padding: 2px 4px;
+    margin-left: -4px;
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    white-space: nowrap;
+  }
+  .chev {
+    font-size: 10px;
+    width: 10px;
+  }
+  .where {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+</style>
