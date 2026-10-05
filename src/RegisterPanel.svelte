@@ -31,6 +31,17 @@
     });
     const nextAddr = $derived(sim.currentStep?.nextAddr ?? null);
 
+    /** Whether a register's value is an address inside (or one past) a memory region. */
+    const pointsIntoRegion = (val: bigint | null) =>
+        val !== null && sim.regions.some((rg) => val >= BigInt(rg.addr) && val <= BigInt(rg.addr + rg.size));
+
+    function togglePointer(reg: string) {
+        const next = new Set(ui.pointerRegs);
+        if (next.has(reg)) next.delete(reg);
+        else next.add(reg);
+        ui.pointerRegs = next;
+    }
+
     function toggleFp() {
         ui.showFp = !ui.showFp;
         ui.firstFpArrowRender = true;
@@ -81,6 +92,16 @@
                                 class="fp-pill"
                                 class:active={ui.showFp}
                                 onclick={toggleFp}>fp</button
+                            >
+                        {/if}
+                        {#if sim.regions.length && ![isa.regs.sp, isa.regs.fp, isa.regs.zero].includes(r.key)}
+                            <button
+                                class="ptr-pill"
+                                class:active={ui.pointerRegs.has(r.key)}
+                                class:dim={!pointsIntoRegion(val)}
+                                aria-pressed={ui.pointerRegs.has(r.key)}
+                                data-tooltip={$_('register_panel.pointer')}
+                                onclick={() => togglePointer(r.key)}>ptr</button
                             >
                         {/if}
                     </div>
@@ -176,6 +197,25 @@
     .flag.changed {
         border-color: var(--orange);
         background: var(--orange-dim);
+    }
+    .ptr-pill {
+        font-size: 12px;
+        font-family: var(--mono);
+        padding: 1px 6px;
+        border: 1px solid var(--text-faint);
+        border-radius: 10px;
+        cursor: pointer;
+        color: var(--text-faint);
+        background: transparent;
+        line-height: 1.4;
+    }
+    .ptr-pill.active {
+        color: var(--purple);
+        border-color: var(--purple);
+        background: var(--purple-dim);
+    }
+    .ptr-pill.dim {
+        opacity: 0.5;
     }
     .fp-pill.active {
         color: var(--blue);

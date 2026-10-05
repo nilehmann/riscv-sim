@@ -32,6 +32,8 @@ function computeDisplayRegs(
 export class UIState {
   activeTab = $state<"asm" | "c">("asm");
   showFp = $state(false);
+  /** Registers shown as arrows into the memory regions they point to. */
+  pointerRegs = $state<Set<string>>(new Set());
   /** Suppresses the CSS transition on the first sp-arrow render. Reset on program load. */
   firstArrowRender = $state(true);
   /** Suppresses the CSS transition on the first fp-arrow render. Reset when fp is toggled on. */

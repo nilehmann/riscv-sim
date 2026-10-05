@@ -25,10 +25,71 @@
   const layout = $derived(layoutRegion(region.root, open, fmtAddr));
   const access = $derived(sim.currentStep?.access);
 
-  const title = $derived.by(() => {
-    const t = region.type;
-    const elem = t.kind === "array" ? t.elem : t;
-    return { decl: typeName(t), size: `sizeof(${typeName(elem)}) = ${region.size / (t.kind === "array" ? t.len : 1)}` };
+  // ── Pointer arrows ──
+  // Registers toggled as pointers whose value is inside the region (or one
+  // past its end), grouped by address.
+  const pointers = $derived.by(() => {
+    const regs = sim.currentStep?.regs ?? {};
+    const byAddr = new Map<number, string[]>();
+    for (const reg of sim.displayRegs.map((r) => r.key).filter((k) => ui.pointerRegs.has(k))) {
+      const v = regs[reg];
+      if (v === undefined || v < BigInt(region.addr) || v > BigInt(region.addr + region.size)) continue;
+      const a = Number(v);
+      byAddr.set(a, [...(byAddr.get(a) ?? []), reg]);
+    }
+    return [...byAddr].map(([addr, regs]) => ({ addr, regs }));
+  });
+  const written = $derived(
+    new Set((sim.currentStep?.hiReg ?? []).map((r) => sim.isa.regs.aliases[r] ?? r)),
+  );
+
+  let laneEl = $state<HTMLElement | null>(null);
+  let gridEl = $state<HTMLElement | null>(null);
+  /**
+   * Horizontal position of each arrow, by its first register, measured after
+   * layout. Until it is re-measured an arrow keeps its old position, so it
+   * slides to the new one.
+   */
+  let arrowX = $state<Map<string, number>>(new Map());
+
+  /** Left edge of the byte at addr: inside the narrowest slot or piece holding it. */
+  function byteX(addr: number): number | null {
+    if (!gridEl || !laneEl) return null;
+    const origin = laneEl.getBoundingClientRect().left;
+    if (addr === region.addr + region.size) return gridEl.getBoundingClientRect().right - origin;
+    let best: { el: Element; start: number; size: number } | null = null;
+    for (const el of gridEl.querySelectorAll("[data-ptr-addr]")) {
+      const start = Number((el as HTMLElement).dataset.ptrAddr);
+      const size = Number((el as HTMLElement).dataset.ptrSize);
+      if (addr >= start && addr < start + size && (!best || size < best.size)) best = { el, start, size };
+    }
+    if (!best) return null;
+    const r = best.el.getBoundingClientRect();
+    return r.left - origin + ((addr - best.start) / best.size) * r.width;
+  }
+
+  function measure() {
+    const next = new Map<number, number>();
+    for (const p of pointers) {
+      const x = byteX(p.addr);
+      if (x !== null) next.set(p.regs[0]!, x);
+    }
+    arrowX = next;
+  }
+
+  $effect(() => {
+    // Anything that can move or resize the slots.
+    void [pointers, ui.slotViewMode, ui.openCards, sim.currentStep];
+    if (!gridEl) return;
+    const id = requestAnimationFrame(measure);
+    return () => cancelAnimationFrame(id);
+  });
+
+  $effect(() => {
+    if (!gridEl) return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(gridEl);
+    return () => ro.disconnect();
   });
 
   const rows = $derived(
@@ -54,12 +115,28 @@
 
 <div class="region">
   <div class="region-title">
-    <span><b>{region.name}</b> : {title.decl}</span>
-    <span>@ {fmtAddr(region.addr)}</span>
-    <span>{title.size}</span>
+    <span><b>{region.name}</b> : {typeName(region.type)}</span>
   </div>
   <div class="region-scroll">
-    <div class="region-grid" style="grid-template-rows:{rows}">
+    <!-- Kept while any register is shown as a pointer, so the region doesn't jump. -->
+    {#if sim.displayRegs.some((r) => ui.pointerRegs.has(r.key))}
+      <div class="arrow-lane" bind:this={laneEl}>
+        <!-- Keyed by the first register so an arrow slides when its register moves. -->
+        {#each pointers as p (p.regs[0])}
+          {@const x = arrowX.get(p.regs[0]!)}
+          {#if x !== undefined}
+            <div class="ptr-arrow" style="left:{x}px">
+              {#key sim.cur}
+                <span class="ptr-label" class:hi={p.regs.some((r) => written.has(r))}>{p.regs.join(" ")}</span>
+              {/key}
+              <span class="ptr-shaft"></span>
+              <span class="ptr-head"></span>
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/if}
+    <div class="region-grid" style="grid-template-rows:{rows}" bind:this={gridEl}>
       {#each layout.leaves as cell (cell.leaf.path)}
         {@const leaf = cell.leaf}
         {@const size = leaf.size as 1 | 2 | 4 | 8}
@@ -75,6 +152,8 @@
           class:inner-start={cell.innerStart}
           class:hi={isAccessed(leaf, access)}
           style="grid-row:1;grid-column:{cell.col}"
+          data-ptr-addr={pieces.length === 1 ? leaf.addr : undefined}
+          data-ptr-size={pieces.length === 1 ? leaf.size : undefined}
         >
           <!-- Same grid in every mode, so addresses and values line up across slots. -->
           <div class="slot-grid" style="grid-template-columns:{picker ? "auto " : ""}repeat({pieces.length}, auto)">
@@ -85,7 +164,12 @@
               </div>
             {/if}
             {#each pieces as piece, i}
-              <span class="slot-addr" style="grid-row:1;grid-column:{i + 1 + picker}">{fmtAddr(piece.addr)}</span>
+              <span
+                class="slot-addr"
+                style="grid-row:1;grid-column:{i + 1 + picker}"
+                data-ptr-addr={pieces.length > 1 ? piece.addr : undefined}
+                data-ptr-size={pieces.length > 1 ? piece.size : undefined}
+              >{fmtAddr(piece.addr)}</span>
               <!-- A whole value also extends under the size picker. -->
               <div class="val-cell" style="grid-row:2;grid-column:{pieces.length === 1 ? "1 / -1" : i + 1 + picker}">
                 {#if leaf.pad}
@@ -147,10 +231,59 @@
   }
   .region-scroll {
     overflow-x: auto;
+    /* Room for an arrow head at either edge without moving the slots. */
+    margin-inline: -8px;
+    padding-inline: 8px;
   }
   .region-grid {
     display: grid;
     width: max-content;
+  }
+
+  /* ── Pointer arrows ── */
+  .arrow-lane {
+    position: relative;
+    height: 42px;
+    min-width: 100%;
+  }
+  .ptr-arrow {
+    position: absolute;
+    bottom: 0;
+    /* The head's tip sits at `left`; the label extends to the right. */
+    transform: translateX(-6px);
+    transition: left 0.45s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--purple);
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .ptr-label {
+    padding: 0 4px 0 2px;
+    border-radius: 3px;
+  }
+  @keyframes ptr-flash {
+    0% { background: var(--purple-dim); }
+    100% { background: transparent; }
+  }
+  .ptr-label.hi {
+    animation: ptr-flash 0.8s ease-out forwards;
+  }
+  .ptr-shaft {
+    margin-left: 5px;
+    width: 2px;
+    height: 10px;
+    background: currentColor;
+  }
+  .ptr-head {
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 9px solid currentColor;
   }
 
   /* ── Value slots ── */

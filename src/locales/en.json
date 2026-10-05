@@ -13,7 +13,8 @@
   },
   "register_panel": {
     "title": "Registers",
-    "sub_reg": "Written as {sub}, the low part of {reg}"
+    "sub_reg": "Written as {sub}, the low part of {reg}",
+    "pointer": "Show as an arrow into memory"
   },
   "stack": {
     "high_address": "high address",

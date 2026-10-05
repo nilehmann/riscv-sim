@@ -13,7 +13,8 @@
   },
   "register_panel": {
     "title": "Registros",
-    "sub_reg": "Escrito como {sub}, la parte baja de {reg}"
+    "sub_reg": "Escrito como {sub}, la parte baja de {reg}",
+    "pointer": "Mostrar como flecha a la memoria"
   },
   "stack": {
     "high_address": "dirección alta",
