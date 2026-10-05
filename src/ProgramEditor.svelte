@@ -9,7 +9,7 @@
     import type { Program, MemoryRegion } from "./types";
     import type { Isa, IsaId } from "./isa/types";
     import { getIsa, ISA_IDS } from "./isa";
-    import { checkElementFit } from "./validation";
+    import { fitsInt, leavesOf } from "./ctypes";
     import { sim, ui } from "./state.svelte";
     import { get } from "svelte/store";
     import { _ } from "svelte-i18n";
@@ -136,11 +136,14 @@
     type RegionRow = { addr: string; elementSize: 1 | 2 | 4; elements: string[] };
     let scrollEls: (HTMLElement | null)[] = [];
     let regions = $state<RegionRow[]>(
-        (sim.program?.memoryRegions ?? []).map(r => ({
-            addr: "0x" + r.addr.toString(16),
-            elementSize: r.elementSize,
-            elements: r.elements.map(e => "0x" + e.toString(16)),
-        }))
+        sim.regions.map(r => {
+            const leaves = leavesOf(r.root).filter(l => !l.pad);
+            return {
+                addr: "0x" + r.addr.toString(16),
+                elementSize: (leaves[0]?.size ?? 4) as 1 | 2 | 4,
+                elements: leaves.map(l => "0x" + l.value!.toString(16)),
+            };
+        })
     );
 
     let loadError = $state<string | null>(null);
@@ -283,7 +286,7 @@
             for (let ei = 0; ei < r.elements.length; ei++) {
                 const v = parseInt(r.elements[ei]!);
                 if (isNaN(v)) { loadError = get(_)("editor.err_region_element", { values: { n: ri + 1, ei } }); return; }
-                const err = checkElementFit(v, r.elementSize, `Region ${ri + 1}, element ${ei}`);
+                const err = fitsInt(v, r.elementSize) ? null : { message: `Region ${ri + 1}, element ${ei}: ${v} does not fit in ${r.elementSize} byte(s)` };
                 if (err) { loadError = err.message; return; }
                 elements.push(v);
             }

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { MemoryRegion } from "./types";
   import { sim, ui } from "./state.svelte";
+  import { leavesOf } from "./ctypes";
   import { fmtAddr } from "./types";
   import { subSlots, readBytes } from "./memUtils";
   import HexValue from "./HexValue.svelte";
@@ -11,10 +11,6 @@
     return sim.currentStep?.hiSlots.includes(wordAddr) ?? false;
   }
 
-  function readElement(region: MemoryRegion, i: number): number {
-    const addr = region.addr + i * region.elementSize;
-    return readBytes(sim.currentStep?.mem ?? new Map(), addr, region.elementSize);
-  }
 
   function slotMode(key: string, def: number): number {
     return ui.slotViewMode.get(key) ?? def;
@@ -27,14 +23,14 @@
   }
 </script>
 
-{#if sim.program?.memoryRegions?.length}
+{#if sim.regions.length}
   <div class="memory-panel">
-    {#each sim.program.memoryRegions as region}
+    {#each sim.regions as region}
       <div class="region-card">
         <div class="region-slots">
-          {#each region.elements as _, i}
-            {@const elemAddr = region.addr + i * region.elementSize}
-            {@const nativeSize = region.elementSize}
+          {#each leavesOf(region.root).filter((l) => !l.pad) as leaf, i}
+            {@const elemAddr = leaf.addr}
+            {@const nativeSize = leaf.size as 1 | 2 | 4}
             {@const key = `mem-${region.addr}-${i}`}
             {@const defaultMode = nativeSize}
             {@const mode = slotMode(key, defaultMode)}
@@ -48,7 +44,7 @@
                   <span class="slot-idx">[{i}]</span>
                 </div>
                 <div class="word-val">
-                  <HexValue value={readElement(region, i)} elementSize={nativeSize} />
+                  <HexValue value={readBytes(sim.currentStep?.mem ?? new Map(), elemAddr, nativeSize)} elementSize={nativeSize} />
                 </div>
               {:else}
                 <div class="slot-expanded">

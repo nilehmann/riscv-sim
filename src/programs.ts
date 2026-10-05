@@ -178,7 +178,7 @@ foo:
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 2 },
     baseAddress: 0x8000,
     memoryRegions: [
-      { addr: 0x10000, elementSize: 4, elements: [10, 20, 30, 40] },
+      { addr: 0x10000, decl: "int arr[4]", init: [10, 20, 30, 40] },
     ],
     cCode: `\
 int arr[] = {10, 20, 30, 40};

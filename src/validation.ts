@@ -1,6 +1,7 @@
 import { AppError, fmtAddr } from "./types";
-import type { Program, MemoryRegion, AssemblyResult } from "./types";
+import type { Program, AssemblyResult, ResolvedRegion } from "./types";
 import type { Isa } from "./isa/types";
+import { resolveRegions } from "./regions";
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -18,17 +19,6 @@ export function checkAddr(v: number, name: string, isa: Isa): AppError | null {
   return null;
 }
 
-export function checkElementFit(
-  v: number,
-  elementSize: MemoryRegion["elementSize"],
-  label: string,
-): AppError | null {
-  const maxVal = elementSize === 4 ? 0xffffffff : (1 << (elementSize * 8)) - 1;
-  if ((v >>> 0) > maxVal)
-    return new AppError(`${label}: ${v} does not fit in ${elementSize} byte(s)`);
-  return null;
-}
-
 export function checkSpStackBase(sp: number, stackBase: number): AppError | null {
   if (sp > stackBase)
     return new AppError(
@@ -37,21 +27,13 @@ export function checkSpStackBase(sp: number, stackBase: number): AppError | null
   return null;
 }
 
-export function checkRegionElements(r: MemoryRegion, ri: number): AppError | null {
-  for (let i = 0; i < r.elements.length; i++) {
-    const err = checkElementFit(r.elements[i]!, r.elementSize, `memoryRegions[${ri}].elements[${i}]`);
-    if (err) return err;
-  }
-  return null;
-}
-
-export function checkRegionRegionOverlap(regions: MemoryRegion[]): AppError | null {
+export function checkRegionRegionOverlap(regions: ResolvedRegion[]): AppError | null {
   for (let ri = 0; ri < regions.length; ri++) {
     const r = regions[ri]!;
-    const rEnd = r.addr + r.elements.length * r.elementSize;
+    const rEnd = r.addr + r.size;
     for (let rj = 0; rj < ri; rj++) {
       const r2 = regions[rj]!;
-      const r2End = r2.addr + r2.elements.length * r2.elementSize;
+      const r2End = r2.addr + r2.size;
       if (overlaps(r.addr, rEnd, r2.addr, r2End))
         return new AppError(
           `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps memoryRegions[${rj}] (${fmtAddr(r2.addr)}–${fmtAddr(r2End - 1)})`,
@@ -62,13 +44,13 @@ export function checkRegionRegionOverlap(regions: MemoryRegion[]): AppError | nu
 }
 
 export function checkRegionStackOverlap(
-  regions: MemoryRegion[],
+  regions: ResolvedRegion[],
   sp: number,
   stackBase: number,
 ): AppError | null {
   for (let ri = 0; ri < regions.length; ri++) {
     const r = regions[ri]!;
-    const rEnd = r.addr + r.elements.length * r.elementSize;
+    const rEnd = r.addr + r.size;
     if (overlaps(r.addr, rEnd, sp, stackBase))
       return new AppError(
         `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the stack (${fmtAddr(sp)}–${fmtAddr(stackBase - 1)})`,
@@ -113,13 +95,13 @@ export function checkCodeStackOverlap(codeEnd: number, stackBase: number): AppEr
 }
 
 export function checkRegionCodeOverlap(
-  regions: MemoryRegion[],
+  regions: ResolvedRegion[],
   progStart: number,
   progEnd: number,
 ): AppError | null {
   for (let ri = 0; ri < regions.length; ri++) {
     const r = regions[ri]!;
-    const rEnd = r.addr + r.elements.length * r.elementSize;
+    const rEnd = r.addr + r.size;
     if (overlaps(r.addr, rEnd, progStart, progEnd))
       return new AppError(
         `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the code segment (${fmtAddr(progStart)}–${fmtAddr(progEnd - 1)})`,
@@ -160,11 +142,8 @@ export function validateProgram(prog: Program, isa: Isa): AppError | null {
     if (err) return err;
   }
 
-  const regions = prog.memoryRegions ?? [];
-  for (let ri = 0; ri < regions.length; ri++) {
-    err = checkRegionElements(regions[ri]!, ri);
-    if (err) return err;
-  }
+  const regions = resolveRegions(prog, isa);
+  if (regions instanceof AppError) return regions;
 
   const stackBase = prog.stackBase ?? isa.defaults.stackBase;
   const sp = prog.initialRegs[isa.regs.sp] ?? stackBase;
@@ -200,5 +179,7 @@ export function validateAssembled(
   err = checkCodeStackOverlap(progEnd, stackBase);
   if (err) return err;
 
-  return checkRegionCodeOverlap(prog.memoryRegions ?? [], progStart, progEnd);
+  const regions = resolveRegions(prog, isa);
+  if (regions instanceof AppError) return regions;
+  return checkRegionCodeOverlap(regions, progStart, progEnd);
 }

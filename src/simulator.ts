@@ -1,7 +1,10 @@
-import type { Program, AssemblyResult, Step, SimulateResult } from "./types";
+import type { Program, AssemblyResult, Step, SimulateResult, ResolvedRegion } from "./types";
+import { AppError } from "./types";
 import type { Isa } from "./isa/types";
 import { getIsa } from "./isa";
 import { Machine } from "./machine";
+import { resolveRegions } from "./regions";
+import { leavesOf } from "./ctypes";
 
 const MAX_STEPS = 500;
 
@@ -16,15 +19,13 @@ export function simulate(
   const osMode = prog.osMode !== false;
   const machine = new Machine(isa, prog.initialRegs, stackBase, osMode);
 
-  for (const region of prog.memoryRegions ?? []) {
-    machine.addRegion(region.addr, region.addr + region.elements.length * region.elementSize);
-    for (let i = 0; i < region.elements.length; i++) {
-      machine.writeMem(
-        region.addr + i * region.elementSize,
-        BigInt(region.elements[i]!),
-        region.elementSize,
-      );
-    }
+  const regions: ResolvedRegion[] | AppError = resolveRegions(prog, isa);
+  if (regions instanceof AppError) throw new Error(regions.message);
+  for (const region of regions) {
+    machine.addRegion(region.addr, region.addr + region.size);
+    // Padding is never written.
+    for (const leaf of leavesOf(region.root))
+      if (!leaf.pad) machine.writeMem(leaf.addr, BigInt(leaf.value!), leaf.size);
   }
 
   isa.setup?.(machine, prog);

@@ -1,4 +1,5 @@
 import type { ControlFlow, Fault, IsaId, StoreInfo } from "./isa/types";
+import type { CType, TypedNode, Value } from "./ctypes";
 
 export const hx = (v: number | bigint, bytes: 1 | 2 | 4 | 6 | 8 = 4): string => {
   if (typeof v === "number" && !Number.isInteger(v)) return "0x" + "?".repeat(bytes * 2);
@@ -14,10 +15,19 @@ export const hx = (v: number | bigint, bytes: 1 | 2 | 4 | 6 | 8 = 4): string => 
 /** Hex address: 8 digits, or 12 for addresses above 4 GiB. */
 export const fmtAddr = (addr: number): string => hx(addr, addr > 0xffffffff ? 6 : 4);
 
-export interface MemoryRegion {
+export type MemoryRegion =
+  /** A C declaration like "Point pts[3]", with an initializer (missing entries are 0). */
+  | { addr: number; decl: string; init?: Value }
+  /** Legacy: an array of unsigned char/short or int. */
+  | { addr: number; elementSize: 1 | 2 | 4; elements: number[] };
+
+/** A region after parsing its declaration and building its value tree. */
+export interface ResolvedRegion {
+  name: string;
   addr: number;
-  elementSize: 1 | 2 | 4;
-  elements: number[];
+  type: CType;
+  size: number;
+  root: TypedNode;
 }
 
 export interface Program {
@@ -38,6 +48,8 @@ export interface Program {
   /** When true, memory accesses outside [sp, stackBase) segfault. Default: true */
   osMode?: boolean;
   assembly: string;
+  /** C struct definitions used by memory region declarations. */
+  types?: string;
   memoryRegions?: MemoryRegion[];
   /** When false, stack detection and visualization are disabled. Default: true */
   showStack?: boolean;

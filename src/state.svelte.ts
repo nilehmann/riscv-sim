@@ -1,10 +1,11 @@
-import type { AssemblyResult, DisplayReg, FrameInfo, Program, SlotLabel, Step } from "./types";
+import type { AssemblyResult, DisplayReg, FrameInfo, Program, ResolvedRegion, SlotLabel, Step } from "./types";
 import type { Isa } from "./isa/types";
 import { AppError, hx } from "./types";
 import { getIsa } from "./isa";
 import { assembleProgram } from "./assembler";
 import { validateProgram, validateAssembled } from "./validation";
 import { simulate } from "./simulator";
+import { resolveRegions } from "./regions";
 import { garbageReg } from "./garbage";
 import { inferDisplayState } from "./inferDisplay";
 import { PROGRAMS } from "./programs";
@@ -63,6 +64,8 @@ export class SimulationState {
   /** Concrete step index of the last concrete instr for source[i]. sourcePositions[0]=0, then sourceToConcrete values. */
   sourcePositions = $state<number[]>([]);
   displayRegs = $state<DisplayReg[]>([]);
+  /** Memory regions with their types and initial values laid out. */
+  regions = $state<ResolvedRegion[]>([]);
   callFramesByStep = $state<FrameInfo[][]>([]);
   slotLabelsByStep = $state<Map<number, SlotLabel>[]>([]);
   inferError = $state<{ step: number; message: string } | null>(null);
@@ -152,6 +155,12 @@ export class SimulationState {
     this.loadError = validateAssembled(prog, assembled, isa);
     if (this.loadError) return;
 
+    const regions = resolveRegions(prog, isa);
+    if (regions instanceof AppError) {
+      this.loadError = regions;
+      return;
+    }
+
     const { steps, sourceToConcrete, initialReturnAddr, initialSlotLabels } = simulate(prog, assembled, isa);
     const { callFramesByStep, slotLabelsByStep, error } = inferDisplayState(
       steps, assembled, prog, isa, initialReturnAddr, initialSlotLabels,
@@ -166,6 +175,7 @@ export class SimulationState {
     this.inferError = error;
     this.sourcePositions = [0, ...sourceToConcrete];
     this.displayRegs = computeDisplayRegs(prog, assembled, isa);
+    this.regions = regions;
     this.cur = 0;
     this.asmMode = "source";
     ui.activeTab = "asm";
