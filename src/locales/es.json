@@ -68,11 +68,15 @@
     "err_stack_pointer": "Valor de puntero de pila inválido",
     "err_reg_value": "Valor inválido para {reg}",
     "err_region_address": "Región {n}: dirección inválida",
-    "err_region_element": "Región {n}, elemento {ei}: valor inválido",
     "isa": "Arquitectura",
     "return_address": "Dirección de retorno",
     "placeholder_return": "opcional — basura si está vacío",
-    "err_return_address": "Dirección de retorno inválida"
+    "err_return_address": "Dirección de retorno inválida",
+    "types": "Tipos",
+    "placeholder_decl": "Point pts[3]",
+    "err_types": "Tipos: {msg}",
+    "err_region_decl": "Región {n}: {msg}",
+    "err_region_value": "Región {n}: {msg}"
   },
   "reg": {
     "pc": "contador de programa",

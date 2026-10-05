@@ -2,6 +2,7 @@
     import { tick, untrack } from "svelte";
     import { EditorView, basicSetup } from "codemirror";
     import { Compartment } from "@codemirror/state";
+    import type { Extension } from "@codemirror/state";
     import { StreamLanguage, HighlightStyle, syntaxHighlighting } from "@codemirror/language";
     import { tags } from "@lezer/highlight";
     import { oneDark } from "@codemirror/theme-one-dark";
@@ -9,8 +10,14 @@
     import type { Program, MemoryRegion } from "./types";
     import type { Isa, IsaId } from "./isa/types";
     import { getIsa, ISA_IDS } from "./isa";
-    import { fitsInt, leavesOf } from "./ctypes";
+    import { parseTypes } from "./ctypes";
+    import { regionDecl } from "./regions";
+    import {
+        regionShape, formKey, formFromRegion, initFromForm, parseValue, setArrayLen, removeRow,
+    } from "./regionForm";
+    import type { FormValues } from "./regionForm";
     import { sim, ui } from "./state.svelte";
+    import { AppError } from "./types";
     import { get } from "svelte/store";
     import { _ } from "svelte-i18n";
 
@@ -47,8 +54,36 @@
       });
     };
 
+    // ── C mode for struct definitions ─────────────────────────────────────────
+
+    const C_KEYWORDS = new Set(["struct", "typedef", "union", "enum"]);
+    const C_TYPES = new Set(["char", "short", "int", "long", "signed", "unsigned", "void"]);
+    const cLang = StreamLanguage.define<{ inComment: boolean }>({
+        startState: () => ({ inComment: false }),
+        token(stream, state) {
+            if (state.inComment) {
+                if (stream.skipTo("*/")) { stream.match("*/"); state.inComment = false; }
+                else stream.skipToEnd();
+                return "comment";
+            }
+            if (stream.eatSpace()) return null;
+            if (stream.match("//")) { stream.skipToEnd(); return "comment"; }
+            if (stream.match("/*")) { state.inComment = true; return "comment"; }
+            if (stream.match(/^0x[0-9a-fA-F]+/i) || stream.match(/^\d+/)) return "number";
+            if (stream.match(/^[A-Za-z_]\w*/)) {
+                const word = stream.current();
+                if (C_KEYWORDS.has(word)) return "keyword";
+                if (C_TYPES.has(word)) return "builtin";
+                return "variable";
+            }
+            stream.next();
+            return null;
+        },
+    });
+
     const asmHighlight = HighlightStyle.define([
         { tag: tags.lineComment,                 color: "var(--text-faint)", fontStyle: "italic" },
+        { tag: tags.blockComment,                color: "var(--text-faint)", fontStyle: "italic" },
         { tag: tags.number,                      color: "var(--blue)" },
         { tag: tags.keyword,                     color: "var(--purple)" },
         { tag: tags.standard(tags.variableName), color: "var(--orange)" },
@@ -79,11 +114,12 @@
     }
 
     let viewRef: EditorView | null = null;
+    let typesViewRef: EditorView | null = null;
+    const views = () => [viewRef, typesViewRef].filter((v): v is EditorView => v !== null);
 
     function syncTheme() {
-        viewRef?.dispatch({
-            effects: themeCompartment.reconfigure(isDark() ? oneDark : []),
-        });
+        for (const v of views())
+            v.dispatch({ effects: themeCompartment.reconfigure(isDark() ? oneDark : []) });
     }
 
     // ── Component state ───────────────────────────────────────────────────────
@@ -133,21 +169,29 @@
         viewRef?.dispatch({ effects: langCompartment.reconfigure(makeLang(next)) });
     }
 
-    type RegionRow = { addr: string; elementSize: 1 | 2 | 4; elements: string[] };
+    let types = $state(sim.program?.types ?? "");
+    const typesEnv = $derived(parseTypes(types, isa.wordBytes));
+
+    // Legacy regions show up converted to their C declaration.
+    type RegionRow = { addr: string; decl: string; values: FormValues };
     let scrollEls: (HTMLElement | null)[] = [];
     let regions = $state<RegionRow[]>(
-        sim.regions.map(r => {
-            const leaves = leavesOf(r.root).filter(l => !l.pad);
-            return {
-                addr: "0x" + r.addr.toString(16),
-                elementSize: (leaves[0]?.size ?? 4) as 1 | 2 | 4,
-                elements: leaves.map(l => "0x" + l.value!.toString(16)),
-            };
-        })
+        sim.regions.map((r, ri) => ({
+            addr: hex(r.addr),
+            decl: regionDecl(sim.program!.memoryRegions![ri]!, ri).decl,
+            values: formFromRegion(r),
+        }))
+    );
+    /** Each region's parsed declaration, or its error. */
+    const shapes = $derived(
+        regions.map((r) =>
+            typesEnv instanceof AppError ? null : regionShape(r.decl, typesEnv, isa.wordBytes),
+        ),
     );
 
     let loadError = $state<string | null>(null);
     let editorContainer = $state<HTMLElement | null>(null);
+    let typesContainer = $state<HTMLElement | null>(null);
 
     const regInvalidIdxs = $derived.by(() => {
         const seen = new Map<string, number>();
@@ -166,28 +210,47 @@
         return errors;
     });
 
-    $effect(() => {
-        if (!editorContainer) return;
-        const v = new EditorView({
-            doc: untrack(() => assembly),
+    function makeView(parent: HTMLElement, doc: string, lang: Extension, onChange: (doc: string) => void) {
+        return new EditorView({
+            doc,
             extensions: [
                 basicSetup,
-                langCompartment.of(untrack(() => makeLang(isa))),
+                lang,
                 syntaxHighlighting(asmHighlight),
                 structuralTheme,
                 themeCompartment.of(isDark() ? oneDark : []),
                 vimCompartment.of(untrack(() => ui.vimMode) ? vim() : []),
                 EditorView.updateListener.of((update) => {
-                    if (update.docChanged) assembly = update.state.doc.toString();
+                    if (update.docChanged) onChange(update.state.doc.toString());
                 }),
             ],
-            parent: editorContainer,
+            parent,
         });
+    }
+
+    $effect(() => {
+        if (!editorContainer) return;
+        const v = makeView(
+            editorContainer,
+            untrack(() => assembly),
+            langCompartment.of(untrack(() => makeLang(isa))),
+            (doc) => (assembly = doc),
+        );
         viewRef = v;
         darkMQ.addEventListener("change", syncTheme);
         return () => {
             darkMQ.removeEventListener("change", syncTheme);
             viewRef = null;
+            v.destroy();
+        };
+    });
+
+    $effect(() => {
+        if (!typesContainer) return;
+        const v = makeView(typesContainer, untrack(() => types), cLang, (doc) => (types = doc));
+        typesViewRef = v;
+        return () => {
+            typesViewRef = null;
             v.destroy();
         };
     });
@@ -199,9 +262,8 @@
 
     $effect(() => {
         ui.vimMode; // track vim mode changes from settings
-        viewRef?.dispatch({
-            effects: vimCompartment.reconfigure(ui.vimMode ? vim() : []),
-        });
+        for (const v of views())
+            v.dispatch({ effects: vimCompartment.reconfigure(ui.vimMode ? vim() : []) });
     });
 
     // ── Actions ───────────────────────────────────────────────────────────────
@@ -218,18 +280,24 @@
     }
 
     function addRegion() {
-        regions = [...regions, { addr: "0x10000", elementSize: 4, elements: ["0x0"] }];
+        const taken = new Set(shapes.map((s) => (s && !(s instanceof AppError) ? s.name : null)));
+        let n = regions.length;
+        while (taken.has(`arr${n}`)) n++;
+        regions = [...regions, { addr: "0x10000", decl: `int arr${n}[1]`, values: {} }];
     }
     function removeRegion(i: number) {
         regions = regions.filter((_, idx) => idx !== i);
     }
-    async function addElement(ri: number) {
-        regions[ri]!.elements = [...regions[ri]!.elements, "0x0"];
+    /** Adding or removing an element rewrites the `[N]` in the declaration. */
+    async function addElement(ri: number, len: number) {
+        regions[ri]!.decl = setArrayLen(regions[ri]!.decl, len + 1);
         await tick();
         scrollEls[ri]?.scrollTo({ top: scrollEls[ri]!.scrollHeight });
     }
-    function removeElement(ri: number, ei: number) {
-        regions[ri]!.elements = regions[ri]!.elements.filter((_, idx) => idx !== ei);
+    function removeElement(ri: number, row: number, len: number) {
+        const r = regions[ri]!;
+        r.values = removeRow(r.values, row);
+        r.decl = setArrayLen(r.decl, len - 1);
     }
 
     function handleWrapperMousedown(e: MouseEvent) {
@@ -277,22 +345,32 @@
             parsedReturnAddr = parseInt(returnAddr);
             if (isNaN(parsedReturnAddr)) { loadError = get(_)("editor.err_return_address"); return; }
         }
+        if (typesEnv instanceof AppError) {
+            loadError = get(_)("editor.err_types", { values: { msg: typesEnv.message } });
+            return;
+        }
         const memoryRegions: MemoryRegion[] = [];
         for (let ri = 0; ri < regions.length; ri++) {
             const r = regions[ri]!;
             const addr = parseInt(r.addr);
             if (isNaN(addr)) { loadError = get(_)("editor.err_region_address", { values: { n: ri + 1 } }); return; }
-            const elements: number[] = [];
-            for (let ei = 0; ei < r.elements.length; ei++) {
-                const v = parseInt(r.elements[ei]!);
-                if (isNaN(v)) { loadError = get(_)("editor.err_region_element", { values: { n: ri + 1, ei } }); return; }
-                const err = fitsInt(v, r.elementSize) ? null : { message: `Region ${ri + 1}, element ${ei}: ${v} does not fit in ${r.elementSize} byte(s)` };
-                if (err) { loadError = err.message; return; }
-                elements.push(v);
+            const shape = shapes[ri]!;
+            if (shape instanceof AppError) {
+                loadError = get(_)("editor.err_region_decl", { values: { n: ri + 1, msg: shape.message } });
+                return;
             }
-            memoryRegions.push({ addr, elementSize: r.elementSize, elements });
+            const init = initFromForm(shape, r.values, typesEnv, isa.wordBytes);
+            if (init instanceof AppError) {
+                loadError = get(_)("editor.err_region_value", { values: { n: ri + 1, msg: init.message } });
+                return;
+            }
+            memoryRegions.push({ addr, decl: r.decl.trim(), init });
         }
-        const prog: Program = { name, isa: isa.id, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase, initialRegs, assembly, showStack, stackBase: parsedStackBase, returnAddress: parsedReturnAddr, memoryRegions };
+        const prog: Program = {
+            name, isa: isa.id, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase,
+            initialRegs, assembly, showStack, stackBase: parsedStackBase, returnAddress: parsedReturnAddr,
+            types: types.trim() ? types : undefined, memoryRegions,
+        };
         sim.loadProgram(prog);
         if (sim.loadError) {
             loadError = sim.loadError.message + (sim.loadError.detail ? `\n${sim.loadError.detail}` : "");
@@ -402,35 +480,73 @@
                 </div>
             {/if}
 
+            <!-- Struct definitions used by the regions -->
+            <div class="field">
+                <label class="field-label">{$_('editor.types')}</label>
+                <div class="asm-editor-wrap types-editor-wrap" bind:this={typesContainer}></div>
+                {#if typesEnv instanceof AppError}
+                    <div class="field-error">{typesEnv.message}</div>
+                {/if}
+            </div>
+
             <!-- Memory regions -->
             <div class="field">
                 <label class="field-label">{$_('editor.memory_regions')}</label>
                 <div class="regions-list">
                     {#each regions as region, ri}
+                        {@const shape = shapes[ri]}
                         <div class="region-card">
                             <div class="region-header">
                                 <input class="input mono region-addr" bind:value={region.addr} placeholder="0x10000" />
-                                <div class="size-group">
-                                    {#each [1, 2, 4] as sz}
-                                        <button
-                                            class="size-btn"
-                                            class:active={region.elementSize === sz}
-                                            onclick={() => (region.elementSize = sz as 1|2|4)}
-                                        >{sz}B</button>
-                                    {/each}
-                                </div>
+                                <input
+                                    class="input mono region-decl"
+                                    class:invalid={shape instanceof AppError}
+                                    bind:value={region.decl}
+                                    placeholder={$_('editor.placeholder_decl')}
+                                />
                                 <button class="remove-btn" onclick={() => removeRegion(ri)}>×</button>
                             </div>
-                            <div class="elements-scroll" bind:this={scrollEls[ri]}>
-                                {#each region.elements as _elem, ei}
-                                    <div class="elem-row">
-                                        <span class="elem-idx mono">[{ei}]</span>
-                                        <input class="input mono elem-val" bind:value={region.elements[ei]} placeholder={$_('editor.placeholder_val')} />
-                                        <button class="remove-btn" onclick={() => removeElement(ri, ei)}>×</button>
+                            {#if shape instanceof AppError}
+                                <div class="field-error">{shape.message}</div>
+                            {:else if shape}
+                                {@const rows = shape.len ?? 1}
+                                {@const named = shape.columns.some((c) => c !== "")}
+                                <div class="elements-scroll" bind:this={scrollEls[ri]}>
+                                    <div
+                                        class="values-grid"
+                                        style="grid-template-columns: auto repeat({shape.columns.length}, minmax(6rem, 1fr)) auto"
+                                    >
+                                        {#if named}
+                                            <span></span>
+                                            {#each shape.columns as col}
+                                                <span class="col-head mono">{col}</span>
+                                            {/each}
+                                            <span></span>
+                                        {/if}
+                                        {#each { length: rows } as _row, row}
+                                            <span class="elem-idx mono">{shape.len === null ? "" : `[${row}]`}</span>
+                                            {#each shape.columns as col}
+                                                {@const key = formKey(shape, row, col)}
+                                                <input
+                                                    class="input mono elem-val"
+                                                    class:invalid={parseValue(region.values[key] ?? "") === null}
+                                                    value={region.values[key] ?? ""}
+                                                    oninput={(e) => (region.values[key] = e.currentTarget.value)}
+                                                    placeholder="0"
+                                                />
+                                            {/each}
+                                            {#if shape.len !== null && shape.len > 1}
+                                                <button class="remove-btn" onclick={() => removeElement(ri, row, shape.len!)}>×</button>
+                                            {:else}
+                                                <span></span>
+                                            {/if}
+                                        {/each}
                                     </div>
-                                {/each}
-                            </div>
-                            <button class="add-reg-btn" onclick={() => addElement(ri)}>{$_('editor.add_element')}</button>
+                                </div>
+                                {#if shape.len !== null}
+                                    <button class="add-reg-btn" onclick={() => addElement(ri, shape.len!)}>{$_('editor.add_element')}</button>
+                                {/if}
+                            {/if}
                         </div>
                     {/each}
                     <button class="add-reg-btn" onclick={addRegion}>{$_('editor.add_region')}</button>
@@ -561,6 +677,15 @@
     }
     .asm-editor-wrap :global(.cm-editor) {
         min-height: 300px;
+    }
+    .types-editor-wrap :global(.cm-editor) {
+        min-height: 120px;
+    }
+    .field-error {
+        color: var(--red);
+        font-family: var(--mono);
+        font-size: 14px;
+        white-space: pre-wrap;
     }
     .regs-list {
         display: flex;
@@ -698,6 +823,9 @@
     .region-addr {
         flex: 1;
     }
+    .region-decl {
+        flex: 2;
+    }
     .size-group {
         display: flex;
         gap: 3px;
@@ -719,18 +847,18 @@
         font-weight: 600;
     }
     .elements-scroll {
-        max-height: 12rem;
-        overflow-y: auto;
-        direction: rtl;
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
+        max-height: 14rem;
+        overflow: auto;
     }
-    .elem-row {
-        direction: ltr;
-        display: flex;
-        gap: 8px;
+    .values-grid {
+        display: grid;
+        gap: 5px 8px;
         align-items: center;
+    }
+    .col-head {
+        font-size: 13px;
+        color: var(--blue);
+        white-space: nowrap;
     }
     .elem-idx {
         flex: 0 0 3rem;
@@ -739,6 +867,6 @@
         text-align: right;
     }
     .elem-val {
-        flex: 1;
+        min-width: 0;
     }
 </style>

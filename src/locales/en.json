@@ -68,11 +68,15 @@
     "err_stack_pointer": "Invalid stack pointer value",
     "err_reg_value": "Invalid value for {reg}",
     "err_region_address": "Region {n}: invalid address",
-    "err_region_element": "Region {n}, element {ei}: invalid value",
     "isa": "Architecture",
     "return_address": "Return address",
     "placeholder_return": "optional — garbage if empty",
-    "err_return_address": "Invalid return address"
+    "err_return_address": "Invalid return address",
+    "types": "Types",
+    "placeholder_decl": "Point pts[3]",
+    "err_types": "Types: {msg}",
+    "err_region_decl": "Region {n}: {msg}",
+    "err_region_value": "Region {n}: {msg}"
   },
   "reg": {
     "pc": "program counter",
