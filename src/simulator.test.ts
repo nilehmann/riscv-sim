@@ -4,6 +4,7 @@ import { simulate } from "./simulator";
 import { AppError } from "./types";
 import type { Program } from "./types";
 import { PROGRAMS } from "./programs";
+import { garbageMem } from "./garbage";
 
 function run(prog: Program) {
   const assembled = assembleProgram(prog);
@@ -66,5 +67,17 @@ describe("typed regions", () => {
     expect(word(mem, 0x10004)).toBe(7);
     expect(mem.get(0x10008)).toBe(0x42);
     expect(word(mem, 0x1000c)).toBe(9);
+  });
+
+  test("loading padding reads the same garbage the view shows", () => {
+    const steps = run({
+      ...base,
+      initialRegs: { ...base.initialRegs, a0: 0x10000 },
+      assembly: "foo:\n    lw a0, 0(a0)\n    ret",
+      memoryRegions: [{ addr: 0x10000, decl: "struct S s[1]", init: [{ c: 0x41, x: 7 }] }],
+    });
+    const a0 = steps[1]!.regs.a0!;
+    expect(a0 & 0xffn).toBe(0x41n);
+    expect(a0 >> 8n).toBe(garbageMem(0x10001, 3));
   });
 });

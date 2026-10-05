@@ -6,6 +6,7 @@
   import type { TypedNode } from "./ctypes";
   import { layoutRegion, isAccessed } from "./regionLayout";
   import { subSlots, readWritten } from "./memUtils";
+  import { garbageMem } from "./garbage";
   import HexValue from "./HexValue.svelte";
   import SlotMode from "./SlotMode.svelte";
 
@@ -99,6 +100,22 @@
   const read = (addr: number, size: number): bigint =>
     readWritten(sim.currentStep?.mem ?? new Map(), addr, size) ?? 0n;
 
+  /**
+   * Padding is never initialized: unwritten bytes hold the same deterministic
+   * garbage a load would read. `garbage` is true when no byte was written.
+   */
+  function readPad(addr: number, size: number): { value: bigint; garbage: boolean } {
+    const mem = sim.currentStep?.mem ?? new Map<number, number>();
+    let value = 0n;
+    let garbage = true;
+    for (let i = 0; i < size; i++) {
+      const b = mem.get(addr + i);
+      if (b !== undefined) garbage = false;
+      value |= BigInt(b ?? Number(garbageMem(addr + i, 1))) << BigInt(i * 8);
+    }
+    return { value, garbage };
+  }
+
   /** The outermost card containing an accessed leaf gets an orange border. */
   const accessedCard = (n: TypedNode) => leavesOf(n).some((l) => isAccessed(l, access));
 
@@ -173,7 +190,13 @@
               <!-- A whole value also extends under the size picker. -->
               <div class="val-cell" style="grid-row:2;grid-column:{pieces.length === 1 ? "1 / -1" : i + 1 + picker}">
                 {#if leaf.pad}
-                  <span class="pad-val">··</span>
+                  {@const pad = readPad(piece.addr, piece.size)}
+                  {#if !pad.garbage || ui.showGarbage}
+                    <!-- Padding can be any size (e.g. 3 bytes); hx handles it. -->
+                    <HexValue value={pad.value} elementSize={piece.size as 1 | 2 | 4 | 8} faint={pad.garbage} />
+                  {:else}
+                    <span class="pad-val">··</span>
+                  {/if}
                 {:else}
                   <HexValue
                     value={read(piece.addr, piece.size)}
