@@ -343,6 +343,44 @@
         dragStart = null;
     }
 
+    // ── Resizing from the right edge, bottom edge or corner ──────────────────
+
+    /** Panel size set by resizing; null until the user resizes. */
+    let size = $state<{ w: number; h: number } | null>(null);
+    let resizeStart: {
+        px: number; py: number; w: number; h: number; x: number; y: number;
+        left: number; top: number; dirX: boolean; dirY: boolean;
+    } | null = null;
+    const MIN_W = 480;
+    const MIN_H = 320;
+
+    function onResizeStart(e: PointerEvent, dirX: boolean, dirY: boolean) {
+        if (e.button !== 0 || !panelEl) return;
+        const r = panelEl.getBoundingClientRect();
+        resizeStart = {
+            px: e.clientX, py: e.clientY, w: r.width, h: r.height, ...drag,
+            left: r.left, top: r.top, dirX, dirY,
+        };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        e.preventDefault();
+    }
+
+    function onResizeMove(e: PointerEvent) {
+        if (!resizeStart) return;
+        const st = resizeStart;
+        // The top-left corner stays put, so the panel can grow up to the window's edge.
+        const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+        const w = st.dirX ? clamp(st.w + e.clientX - st.px, MIN_W, window.innerWidth - st.left - 8) : st.w;
+        const h = st.dirY ? clamp(st.h + e.clientY - st.py, MIN_H, window.innerHeight - st.top - 8) : st.h;
+        size = { w, h };
+        // The panel is centered, so growing it by d moves its top-left by -d/2: compensate.
+        drag = { x: st.x + (w - st.w) / 2, y: st.y + (h - st.h) / 2 };
+    }
+
+    function onResizeEnd() {
+        resizeStart = null;
+    }
+
     function load() {
         loadError = null;
         if (regInvalidIdxs.size > 0) {
@@ -417,9 +455,12 @@
     <div
         class="panel"
         bind:this={panelEl}
-        style="transform: translate({drag.x}px, {drag.y}px)"
+        class:sized={size !== null}
+        style="transform: translate({drag.x}px, {drag.y}px);{size ? `width:${size.w}px;height:${size.h}px` : ''}"
         onclick={(e) => e.stopPropagation()}
     >
+        <!-- Drag handle for the mouse; the panel is fully usable without it. -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
             class="panel-header"
             onpointerdown={onDragStart}
@@ -604,6 +645,17 @@
             <button class="btn btn-cancel" onclick={() => (ui.showEditor = false)}>{$_('editor.cancel')}</button>
             <button class="btn btn-load" onclick={load}>{$_('editor.load')}</button>
         </div>
+        <!-- Resize handles -->
+        {#each [["right", true, false], ["bottom", false, true], ["corner", true, true]] as const as [where, dirX, dirY]}
+            <div
+                class="resize-handle resize-{where}"
+                aria-hidden="true"
+                onpointerdown={(e) => onResizeStart(e, dirX, dirY)}
+                onpointermove={onResizeMove}
+                onpointerup={onResizeEnd}
+                onpointercancel={onResizeEnd}
+            ></div>
+        {/each}
     </div>
 </div>
 
@@ -618,6 +670,7 @@
         justify-content: center;
     }
     .panel {
+        position: relative;
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -627,6 +680,37 @@
         display: flex;
         flex-direction: column;
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    }
+    /* Once resized, the size is set explicitly and may exceed the defaults. */
+    .panel.sized {
+        max-width: none;
+        max-height: none;
+    }
+    .resize-handle {
+        position: absolute;
+        touch-action: none;
+        z-index: 1;
+    }
+    .resize-right {
+        top: 8px;
+        bottom: 8px;
+        right: -4px;
+        width: 8px;
+        cursor: ew-resize;
+    }
+    .resize-bottom {
+        left: 8px;
+        right: 8px;
+        bottom: -4px;
+        height: 8px;
+        cursor: ns-resize;
+    }
+    .resize-corner {
+        right: -4px;
+        bottom: -4px;
+        width: 16px;
+        height: 16px;
+        cursor: nwse-resize;
     }
     .panel-header {
         display: flex;
@@ -676,7 +760,16 @@
     }
     .row2 {
         display: flex;
+        flex-wrap: wrap;
         gap: 12px;
+    }
+    /* Fields share a row and wrap onto the next one when the panel is narrow. */
+    .row2 .field {
+        flex: 1 1 200px;
+        min-width: 0;
+    }
+    .row2 .field-narrow {
+        flex: 0 1 160px;
     }
     .field {
         display: flex;
@@ -696,6 +789,7 @@
         letter-spacing: 0.05em;
     }
     .input {
+        min-width: 0;
         padding: 8px 10px;
         border: 1px solid var(--border);
         border-radius: 6px;
