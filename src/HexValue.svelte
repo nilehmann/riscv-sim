@@ -6,7 +6,17 @@
     value,
     elementSize = 4,
     faint = false,
-  }: { value: number | bigint; elementSize?: 1 | 2 | 4 | 8; faint?: boolean } = $props();
+    path,
+    offset,
+  }: {
+    value: number | bigint;
+    elementSize?: 1 | 2 | 4 | 8;
+    faint?: boolean;
+    /** C path of the value (`rects[1].max.y`), shown first in the tooltip. */
+    path?: string;
+    /** Byte offset shown next to the path. */
+    offset?: number;
+  } = $props();
 
   const unsigned = $derived(BigInt.asUintN(elementSize * 8, BigInt(value)));
   const signed = $derived(BigInt.asIntN(elementSize * 8, BigInt(value)));
@@ -49,6 +59,12 @@
     bind:this={tooltipEl}
     style="left:{x}px;top:{y}px"
   >
+    {#if path}
+      <div class="tt-row tt-path">
+        <span class="tt-num">{path}</span>
+        {#if offset !== undefined}<span class="tt-label">+{offset}</span>{/if}
+      </div>
+    {/if}
     <div class="tt-row">
       <span class="tt-label">{$_('hex_value.unsigned')}</span>
       <span class="tt-num">{unsigned}</span>
@@ -95,6 +111,10 @@
     gap: 20px;
     font-family: var(--mono);
     font-size: 13px;
+  }
+  .tt-path {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
   }
   .tt-label {
     color: var(--text-faint);

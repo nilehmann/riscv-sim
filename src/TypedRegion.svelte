@@ -85,7 +85,12 @@
               <span class="slot-addr">{fmtAddr(leaf.addr)}</span>
             </div>
             <div class="word-val">
-              <HexValue value={read(leaf.addr, size)} elementSize={size} />
+              <HexValue
+                value={read(leaf.addr, size)}
+                elementSize={size}
+                path={leaf.path}
+                offset={leaf.addr - region.addr}
+              />
             </div>
           {:else}
             <div class="slot-expanded">
@@ -94,7 +99,12 @@
                 {#each subSlots(leaf.addr, size, mode as 1 | 2 | 4) as sub}
                   <span class="sub-grid-addr">{fmtAddr(sub.addr)}</span>
                   <div class="val-cell">
-                    <HexValue value={read(sub.addr, sub.size)} elementSize={sub.size} />
+                    <HexValue
+                      value={read(sub.addr, sub.size)}
+                      elementSize={sub.size}
+                      path={leaf.path}
+                      offset={sub.addr - region.addr}
+                    />
                   </div>
                 {/each}
               </div>
