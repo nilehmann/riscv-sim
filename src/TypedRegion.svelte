@@ -11,7 +11,17 @@
 
   let { region }: { region: ResolvedRegion } = $props();
 
-  const open = $derived(new Set<string>());
+  const open = $derived(ui.openCards.get(region.name) ?? new Set<string>());
+
+  /** Toggles one card only, so the cards inside it keep their state. */
+  function toggle(path: string) {
+    const set = new Set(open);
+    if (set.has(path)) set.delete(path);
+    else set.add(path);
+    const next = new Map(ui.openCards);
+    next.set(region.name, set);
+    ui.openCards = next;
+  }
   const layout = $derived(layoutRegion(region.root, open, fmtAddr));
   const access = $derived(sim.currentStep?.access);
 
@@ -104,7 +114,9 @@
           class:accessed={card.outer && accessedCard(card.node)}
           style="grid-row:1 / {card.lastRow + 1};grid-column:{card.col} / span {card.span};z-index:{1 + card.node.depth}"
         >
-          <span class="toggle"><span class="chev">{card.open ? "▾" : "▸"}</span>{card.node.label}</span>
+          <button class="toggle" aria-expanded={card.open} onclick={() => toggle(card.node.path)}>
+            <span class="chev" aria-hidden="true">{card.open ? "▾" : "▸"}</span>{card.node.label}
+          </button>
           <span class="where">{card.where}</span>
         </div>
       {/each}
@@ -268,6 +280,11 @@
     border-color: var(--orange);
   }
   .toggle {
+    pointer-events: auto;
+    background: none;
+    border: 0;
+    border-radius: 3px;
+    cursor: pointer;
     font-family: var(--mono);
     font-size: 12px;
     font-weight: 600;
@@ -278,6 +295,13 @@
     gap: 4px;
     align-items: center;
     white-space: nowrap;
+  }
+  .toggle:hover {
+    background: var(--blue-dim);
+    color: var(--blue);
+  }
+  .toggle:focus-visible {
+    outline: 2px solid var(--blue);
   }
   .chev {
     font-size: 10px;

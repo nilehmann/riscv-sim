@@ -39,6 +39,8 @@ export class UIState {
   selectorOpen = $state(false);
   /** User-chosen piece size in bytes for a slot, by slot key. */
   slotViewMode = $state<Map<string, number>>(new Map());
+  /** Paths of the expanded cards of each memory region, by region name. Reset on program load. */
+  openCards = $state<Map<string, Set<string>>>(new Map());
   showGarbage = $state(true);
   theme = $state<'light' | 'dark' | 'system'>(
     (localStorage.getItem('theme') as 'light' | 'dark' | 'system') ?? 'system'
@@ -181,6 +183,7 @@ export class SimulationState {
     ui.activeTab = "asm";
     ui.firstArrowRender = true;
     ui.slotViewMode = new Map();
+    ui.openCards = new Map();
   }
 }
 
