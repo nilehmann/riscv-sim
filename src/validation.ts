@@ -36,7 +36,7 @@ export function checkRegionRegionOverlap(regions: ResolvedRegion[]): AppError | 
       const r2End = r2.addr + r2.size;
       if (overlaps(r.addr, rEnd, r2.addr, r2End))
         return new AppError(
-          `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps memoryRegions[${rj}] (${fmtAddr(r2.addr)}–${fmtAddr(r2End - 1)})`,
+          `region "${r.name}" (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps region "${r2.name}" (${fmtAddr(r2.addr)}–${fmtAddr(r2End - 1)})`,
         );
     }
   }
@@ -53,7 +53,7 @@ export function checkRegionStackOverlap(
     const rEnd = r.addr + r.size;
     if (overlaps(r.addr, rEnd, sp, stackBase))
       return new AppError(
-        `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the stack (${fmtAddr(sp)}–${fmtAddr(stackBase - 1)})`,
+        `region "${r.name}" (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the stack (${fmtAddr(sp)}–${fmtAddr(stackBase - 1)})`,
       );
   }
   return null;
@@ -104,7 +104,7 @@ export function checkRegionCodeOverlap(
     const rEnd = r.addr + r.size;
     if (overlaps(r.addr, rEnd, progStart, progEnd))
       return new AppError(
-        `memoryRegions[${ri}] (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the code segment (${fmtAddr(progStart)}–${fmtAddr(progEnd - 1)})`,
+        `region "${r.name}" (${fmtAddr(r.addr)}–${fmtAddr(rEnd - 1)}) overlaps the code segment (${fmtAddr(progStart)}–${fmtAddr(progEnd - 1)})`,
       );
   }
   return null;
