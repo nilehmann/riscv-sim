@@ -16,9 +16,9 @@ const word = (mem: Map<number, number>, addr: number) =>
   [0, 1, 2, 3].reduce((v, i) => v | ((mem.get(addr + i) ?? 0) << (i * 8)), 0) >>> 0;
 
 describe("memory regions in OS mode", () => {
-  const globalArray = PROGRAMS.find((p) => p.name === "Global array")!;
+  const globalArray = PROGRAMS.find((p) => p.name === "Array on the heap")!;
 
-  test("Global array runs without faulting", () => {
+  test("Array on the heap runs without faulting", () => {
     const steps = run(globalArray);
     expect(steps.every((s) => !s.fault)).toBe(true);
     expect(word(steps[steps.length - 1]!.mem, 0x10008)).toBe(60);

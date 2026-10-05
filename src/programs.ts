@@ -1,15 +1,75 @@
 import type { Program } from "./types";
 
+/** Loaded at startup, before any example is picked. */
+export const EMPTY_PROGRAM: Program = {
+  name: "New program",
+  initialRegs: {},
+  baseAddress: 0x8000,
+  assembly: "",
+  showStack: false,
+};
+
 export const PROGRAMS: Program[] = [
   {
-    name: "New program",
-    initialRegs: {},
+    name: "load big immediate",
+    folder: "Basics",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
     baseAddress: 0x8000,
-    assembly: "",
-    showStack: false,
+    assembly: `\
+foo:
+    li  a0, 4097
+    ret`,
+  },
+  {
+    name: "Conditional jump",
+    folder: "Basics",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0 },
+    baseAddress: 0x8000,
+    assembly: `\
+foo:
+    beq a0, zero, .L0
+    addi a0, a0, 1
+.L0:
+    addi a0, a0, 2
+    ret`,
+  },
+  {
+    name: "Store a byte",
+    folder: "Basics",
+    entryPoint: "foo",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
+    baseAddress: 0x8000,
+    cCode: `\
+int baz(char *c) {
+    return *c;
+}
+
+int foo() {
+  char c = 42;
+  return baz(&c);
+}
+`,
+    assembly: `\
+baz:
+        lbu     a0,0(a0)
+        ret
+foo:
+        addi    sp,sp,-32
+        sw      ra,28(sp)
+        li      a5,42
+        sb      a5,15(sp)
+        addi    a0,sp,15
+        call    baz
+        lw      ra,28(sp)
+        addi    sp,sp,32
+        jr      ra
+      `,
   },
   {
     name: "baz -> foo",
+    folder: "Function calls",
     cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
     entryPoint: "baz",
     initialRegs: { sp: 0xbfffff00, ra: 0x8050, a0: 3, s0: 0x54 },
@@ -34,6 +94,7 @@ baz:
   },
   {
     name: "bar -> foo -> baz",
+    folder: "Function calls",
     entryPoint: "bar",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 3, s0: 0x54 },
     baseAddress: 0x8000,
@@ -67,6 +128,7 @@ bar:
   },
   {
     name: "Local variable",
+    folder: "Stack and locals",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },
     baseAddress: 0x8000,
@@ -96,6 +158,7 @@ foo:
   },
   {
     name: "Static array",
+    folder: "Stack and locals",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 1 },
     baseAddress: 0x8000,
@@ -122,6 +185,7 @@ foo:
   },
   {
     name: "Dynamic array",
+    folder: "Stack and locals",
     entryPoint: "foo",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 3 },
     baseAddress: 0x8000,
@@ -150,56 +214,33 @@ void foo(int n) {
       jr      ra`,
   },
   {
-    name: "load big immediate",
+    name: "Array on the heap",
+    folder: "Heap",
     entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
-    baseAddress: 0x8000,
-    assembly: `\
-foo:
-    li  a0, 4097
-    ret`,
-  },
-  {
-    name: "Conditional jump",
-    entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0 },
-    baseAddress: 0x8000,
-    assembly: `\
-foo:
-    beq a0, zero, .L0
-    addi a0, a0, 1
-.L0:
-    addi a0, a0, 2
-    ret`,
-  },
-  {
-    name: "Global array",
-    entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 2 },
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 2 },
     baseAddress: 0x8000,
     memoryRegions: [
       { addr: 0x10000, decl: "int arr[4]", init: [10, 20, 30, 40] },
     ],
     cCode: `\
-int arr[] = {10, 20, 30, 40};
-
-int foo(int i) {
+// arr = malloc(4 * sizeof(int)), holding {10, 20, 30, 40}
+int foo(int *arr, int i) {
     arr[i] = arr[i] * 2;
     return arr[i];
 }`,
     assembly: `\
 foo:
-    li      a5, 0x10000
-    slli    a4, a0, 2
-    add     a5, a5, a4
-    lw      a4, 0(a5)
+    slli    a1, a1, 2
+    add     a0, a0, a1
+    lw      a4, 0(a0)
     slli    a4, a4, 1
-    sw      a4, 0(a5)
+    sw      a4, 0(a0)
     mv      a0, a4
     ret`,
   },
   {
     name: "Struct field",
+    folder: "Heap",
     entryPoint: "get_y",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
     baseAddress: 0x8000,
@@ -217,8 +258,7 @@ typedef struct {
   int y;
 } Point;
 
-Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};
-
+// pts = malloc(3 * sizeof(Point)), holding {{1, 2}, {3, 4}, {5, 6}}
 int get_y(Point *pts, int i) {
   return pts[i].y;
 }`,
@@ -231,6 +271,7 @@ get_y:
   },
   {
     name: "Struct padding",
+    folder: "Heap",
     entryPoint: "get_x",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
     baseAddress: 0x8000,
@@ -248,8 +289,7 @@ struct S {
   int  x;   // +4 (3 bytes padding)
 };
 
-struct S s[2] = {{'A', 7}, {'B', 9}};
-
+// s = malloc(2 * sizeof(struct S)), holding {{'A', 7}, {'B', 9}}
 int get_x(struct S *s, int i) {
   return s[i].x;
 }`,
@@ -261,7 +301,55 @@ get_x:
     ret`,
   },
   {
+    name: "Padding before a struct",
+    folder: "Heap",
+    entryPoint: "get",
+    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
+    baseAddress: 0x8000,
+    showStack: false,
+    types: `typedef struct {
+  int x;
+  int y;
+} Point;
+
+struct Item {
+  char  kind;  // +0, then 3 bytes padding
+  Point pos;   // +4 (Point is 4-aligned)
+};`,
+    memoryRegions: [
+      {
+        addr: 0x10000,
+        decl: "struct Item items[2]",
+        init: [{ kind: 0x61, pos: { x: 5, y: 6 } }, { kind: 0x62, pos: { x: 7, y: 8 } }],
+      },
+    ],
+    cCode: `\
+typedef struct {
+  int x;
+  int y;
+} Point;
+
+struct Item {
+  char  kind;  // +0, then 3 bytes padding
+  Point pos;   // +4 (Point is 4-aligned)
+};             // sizeof = 12
+
+// it = malloc(2 * sizeof(struct Item)), holding {{'a', {5, 6}}, {'b', {7, 8}}}
+int get(struct Item *it, int i) {
+  return it[i].pos.y;  // 4 + 4 = 8
+}`,
+    assembly: `\
+get:
+    slli    a5, a1, 1
+    add     a5, a5, a1
+    slli    a5, a5, 2
+    add     a0, a0, a5
+    lw      a0, 8(a0)
+    ret`,
+  },
+  {
     name: "Nested struct",
+    folder: "Heap",
     entryPoint: "top",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
     baseAddress: 0x8000,
@@ -296,8 +384,7 @@ typedef struct {
   Point max;   // +8
 } Rect;
 
-Rect rects[2] = {{{0, 0}, {4, 3}}, {{1, 1}, {9, 7}}};
-
+// r = malloc(2 * sizeof(Rect)), holding {{{0, 0}, {4, 3}}, {{1, 1}, {9, 7}}}
 int top(Rect *r, int i) {
   return r[i].max.y;   // 8 + 4 = 12
 }`,
@@ -309,54 +396,8 @@ top:
     ret`,
   },
   {
-    name: "Padding before a nested struct",
-    entryPoint: "get",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
-    baseAddress: 0x8000,
-    showStack: false,
-    types: `typedef struct {
-  int x;
-  int y;
-} Point;
-
-struct Item {
-  char  kind;  // +0, then 3 bytes padding
-  Point pos;   // +4 (Point is 4-aligned)
-};`,
-    memoryRegions: [
-      {
-        addr: 0x10000,
-        decl: "struct Item items[2]",
-        init: [{ kind: 0x61, pos: { x: 5, y: 6 } }, { kind: 0x62, pos: { x: 7, y: 8 } }],
-      },
-    ],
-    cCode: `\
-typedef struct {
-  int x;
-  int y;
-} Point;
-
-struct Item {
-  char  kind;  // +0, then 3 bytes padding
-  Point pos;   // +4 (Point is 4-aligned)
-};             // sizeof = 12
-
-struct Item items[2] = {{'a', {5, 6}}, {'b', {7, 8}}};
-
-int get(struct Item *it, int i) {
-  return it[i].pos.y;  // 4 + 4 = 8
-}`,
-    assembly: `\
-get:
-    slli    a5, a1, 1
-    add     a5, a5, a1
-    slli    a5, a5, 2
-    add     a0, a0, a5
-    lw      a0, 8(a0)
-    ret`,
-  },
-  {
     name: "Array in struct",
+    folder: "Heap",
     entryPoint: "get",
     initialRegs: { sp: 0xbfffff00, ra: 0x9000, a0: 0x10000, a1: 1 },
     baseAddress: 0x8000,
@@ -384,8 +425,7 @@ typedef struct {
   Point v[2];   // +4
 } Poly;
 
-Poly poly = {2, {{1, 2}, {3, 4}}};
-
+// p = malloc(sizeof(Poly)), holding {2, {{1, 2}, {3, 4}}}
 int get(Poly *p, int i) {
   return p->v[i].y;   // 4 + i*8 + 4
 }`,
@@ -397,38 +437,8 @@ get:
     ret`,
   },
   {
-    name: "Store a byte",
-    entryPoint: "foo",
-    initialRegs: { sp: 0xbfffff00, ra: 0x9000 },
-    baseAddress: 0x8000,
-    cCode: `\
-int baz(char *c) {
-    return *c;
-}
-
-int foo() {
-  char c = 42;
-  return baz(&c);
-}
-`,
-    assembly: `\
-baz:
-        lbu     a0,0(a0)
-        ret
-foo:
-        addi    sp,sp,-32
-        sw      ra,28(sp)
-        li      a5,42
-        sb      a5,15(sp)
-        addi    a0,sp,15
-        call    baz
-        lw      ra,28(sp)
-        addi    sp,sp,32
-        jr      ra
-      `,
-  },
-  {
     name: "baz -> foo",
+    folder: "Function calls",
     isa: "x86",
     cCode: `int foo(int x) {\n    return x + 1;\n}\n\nint baz(int y) {\n    return foo(1) + y;\n}`,
     entryPoint: "baz",

@@ -34,7 +34,7 @@ describe("bundled programs", () => {
     ["Struct field", "pts[1].y"],
     ["Struct padding", "s[1].x"],
     ["Nested struct", "rects[1].max.y"],
-    ["Padding before a nested struct", "items[1].pos.y"],
+    ["Padding before a struct", "items[1].pos.y"],
     ["Array in struct", "poly.v[1].y"],
   ])("%s loads %s", (name, path) => {
     const { steps, regions } = run(PROGRAMS.find((p) => p.name === name)!);

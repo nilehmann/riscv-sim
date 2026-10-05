@@ -8,7 +8,7 @@ import { simulate } from "./simulator";
 import { resolveRegions } from "./regions";
 import { garbageReg } from "./garbage";
 import { inferDisplayState } from "./inferDisplay";
-import { PROGRAMS } from "./programs";
+import { EMPTY_PROGRAM } from "./programs";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -49,6 +49,8 @@ export class UIState {
   );
   showSettings = $state(false);
   showEditor = $state(false);
+  /** Whether the editor starts blank (New) instead of from the loaded program (Edit). */
+  editorNew = $state(false);
   vimMode = $state<boolean>(localStorage.getItem("vimMode") === "true");
 }
 
@@ -61,7 +63,10 @@ export const ui = new UIState();
 
 export class SimulationState {
   // ── Core state ──
-  program = $state<Program | null>(null);
+  // Raw: never mutated, and compared by identity with the entries of PROGRAMS.
+  program = $state.raw<Program | null>(null);
+  /** Programs loaded from the editor this session, in memory only. */
+  userPrograms = $state.raw<Program[]>([]);
   isa = $state<Isa>(getIsa());
   assembled = $state<AssemblyResult | null>(null);
   steps = $state<Step[]>([]);
@@ -143,6 +148,17 @@ export class SimulationState {
     }
   }
 
+  /**
+   * Adds a program loaded from the editor to the session's list, replacing
+   * `replaces` if it is one of them (editing your own program).
+   */
+  saveUserProgram(prog: Program, replaces: Program | null): void {
+    const i = replaces ? this.userPrograms.indexOf(replaces) : -1;
+    this.userPrograms = i === -1
+      ? [...this.userPrograms, prog]
+      : this.userPrograms.map((p, j) => (j === i ? prog : p));
+  }
+
   loadProgram(prog: Program): void {
     this.loadError = null;
 
@@ -202,4 +218,4 @@ export function fmtRegVal(key: string, val: bigint | null | undefined): string {
 }
 
 // ─── Load the first program immediately ───────────────────────────────────
-sim.loadProgram(PROGRAMS[0]!);
+sim.loadProgram(EMPTY_PROGRAM);

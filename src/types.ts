@@ -32,6 +32,8 @@ export interface ResolvedRegion {
 
 export interface Program {
   name: string;
+  /** Category in the program selector, e.g. "Heap". */
+  folder?: string;
   /** Instruction set the assembly is written for. Default: "rv32" */
   isa?: IsaId;
   cCode?: string;

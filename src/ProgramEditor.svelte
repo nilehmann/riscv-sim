@@ -128,28 +128,32 @@
     /** Default return-address register value for ISAs that have one. */
     const DEFAULT_RA = 0x8050;
 
-    let name = $state(sim.program?.name ?? "");
-    let entryPoint = $state(sim.program?.entryPoint ?? "");
-    let baseAddress = $state(hex(sim.program?.baseAddress ?? sim.isa.defaults.baseAddress));
-    let assembly = $state(sim.program?.assembly ?? "");
+    // New starts blank; Edit starts from the loaded program.
+    const source = ui.editorNew ? null : sim.program;
+    const sourceRegions = ui.editorNew ? [] : sim.regions;
+
+    let name = $state(source?.name ?? "");
+    let entryPoint = $state(source?.entryPoint ?? "");
+    let baseAddress = $state(hex(source?.baseAddress ?? sim.isa.defaults.baseAddress));
+    let assembly = $state(source?.assembly ?? "");
     let regs = $state<Array<{ reg: string; val: string }>>(
         Object.entries(
             (() => {
-                const ir = sim.program?.initialRegs;
+                const ir = source?.initialRegs;
                 const raDefault: Record<string, number> = RA ? { [RA]: DEFAULT_RA } : {};
                 const defaults: Record<string, number> = { [SP]: isa.defaults.sp, ...raDefault };
-                if (!ir) return sim.program?.showStack ? raDefault : defaults;
-                return sim.program.showStack
+                if (!ir) return source?.showStack ? raDefault : defaults;
+                return source.showStack
                     ? Object.fromEntries(Object.entries(ir).filter(([k]) => k !== SP))
                     : ir;
             })()
         ).map(([reg, val]) => ({ reg, val: "0x" + (val as number).toString(16) }))
     );
-    let showStack = $state(sim.program?.showStack ?? false);
-    let stackBase = $state(hex(sim.program?.stackBase ?? sim.isa.defaults.stackBase));
-    let stackSp   = $state(hex(sim.program?.initialRegs?.[sim.isa.regs.sp] ?? sim.isa.defaults.sp));
+    let showStack = $state(source?.showStack ?? false);
+    let stackBase = $state(hex(source?.stackBase ?? sim.isa.defaults.stackBase));
+    let stackSp   = $state(hex(source?.initialRegs?.[sim.isa.regs.sp] ?? sim.isa.defaults.sp));
     // Only for ISAs that keep the return address on the stack.
-    let returnAddr = $state(sim.program?.returnAddress != null ? hex(sim.program.returnAddress) : "");
+    let returnAddr = $state(source?.returnAddress != null ? hex(source.returnAddress) : "");
 
     // Registers and addresses differ between ISAs, so switching starts from
     // the new ISA's defaults. The assembly text is kept.
@@ -169,16 +173,16 @@
         viewRef?.dispatch({ effects: langCompartment.reconfigure(makeLang(next)) });
     }
 
-    let types = $state(sim.program?.types ?? "");
+    let types = $state(source?.types ?? "");
     const typesEnv = $derived(parseTypes(types, isa.wordBytes));
 
     // Legacy regions show up converted to their C declaration.
     type RegionRow = { addr: string; decl: string; values: FormValues };
     let scrollEls: (HTMLElement | null)[] = [];
     let regions = $state<RegionRow[]>(
-        sim.regions.map((r, ri) => ({
+        sourceRegions.map((r, ri) => ({
             addr: hex(r.addr),
-            decl: regionDecl(sim.program!.memoryRegions![ri]!, ri).decl,
+            decl: regionDecl(source!.memoryRegions![ri]!, ri).decl,
             values: formFromRegion(r),
         }))
     );
@@ -436,7 +440,7 @@
             memoryRegions.push({ addr, decl: r.decl.trim(), init });
         }
         const prog: Program = {
-            name, isa: isa.id, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase,
+            name: name.trim() || get(_)("editor.untitled"), isa: isa.id, entryPoint: entryPoint.trim() || undefined, baseAddress: parsedBase,
             initialRegs, assembly, showStack, stackBase: parsedStackBase, returnAddress: parsedReturnAddr,
             types: types.trim() ? types : undefined, memoryRegions,
         };
@@ -445,6 +449,8 @@
             loadError = sim.loadError.message + (sim.loadError.detail ? `\n${sim.loadError.detail}` : "");
             return;
         }
+        // Editing an example keeps the example and adds the edited copy.
+        sim.saveUserProgram(prog, source);
         ui.showEditor = false;
     }
 </script>
@@ -468,7 +474,7 @@
             onpointerup={onDragEnd}
             onpointercancel={onDragEnd}
         >
-            <span class="panel-title">{$_('editor.title')}</span>
+            <span class="panel-title">{source ? $_('editor.title') : $_('editor.title_new')}</span>
             <button class="close-btn" onclick={() => (ui.showEditor = false)}>×</button>
         </div>
 
